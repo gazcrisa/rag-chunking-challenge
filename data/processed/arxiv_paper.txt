@@ -1,0 +1,482 @@
+
+--- Page 1 ---
+
+arXiv:2408.09869v5 [cs.CL] 9 Dec 2024 Docling Technical Report Version 1.0 Christoph Auer Maksym Lysak Ahmed Nassar Michele Dolfi Nikolaos Livathinos Panos Vagenas Cesar Berrospi Ramis Matteo Omenetti Fabian Lindlbauer Kasper Dinkla Lokesh Mishra Yusik Kim Shubham Gupta Rafael Teixeira de Lima Valery Weber Lucas Morin Ingmar Meijer Viktor Kuropiatnyk Peter W. J. Staar AI4K Group, IBM Research R¨uschlikon, Switzerland Abstract This technical report introduces Docling, an easy to use, self-contained, MITlicensed open-source package for PDF document conversion. It is powered by state-of-the-art specialized AI models for layout analysis (DocLayNet) and table structure recognition (TableFormer), and runs efficiently on commodity hardware in a small resource budget. The code interface allows for easy extensibility and addition of new features and models. 1 Introduction Converting PDF documents back into a machine-processable format has been a major challenge for decades due to their huge variability in formats, weak standardization and printing-optimized characteristic, which discards most structural features and metadata. With the advent of LLMs and popular application patterns such as retrieval-augmented generation (RAG), leveraging the rich content embedded in PDFs has become ever more relevant. In the past decade, several powerful document understanding solutions have emerged on the market, most of which are commercial software, cloud offerings  and most recently, multi-modal vision-language models. As of today, only a handful of open-source tools cover PDF conversion, leaving a significant feature and quality gap to proprietary solutions. With Docling, we open-source a very capable and efficient document conversion tool which builds on the powerful, specialized AI models and datasets for layout analysis and table structure recognition we developed and presented in the recent past [12, 13, 9]. Docling is designed as a simple, self-contained python library with permissive license, running entirely locally on commodity hardware. Its code architecture allows for easy extensibility and addition of new features and models. Docling Technical Report 1
+
+--- Page 2 ---
+
+Here is what Docling delivers today: • Converts PDF documents to JSON or Markdown format, stable and lightning fast • Understands detailed page layout, reading order, locates figures and recovers table structures • Extracts metadata from the document, such as title, authors, references and language • Optionally applies OCR, e.g. for scanned PDFs • Can be configured to be optimal for batch-mode (i.e high throughput, low time-to-solution) or interactive mode (compromise on efficiency, low time-to-solution) • Can leverage different accelerators (GPU, MPS, etc). 2 Getting Started To use Docling, you can simply install the docling package from PyPI. Documentation and examples are available in our GitHub repository at github.com/DS4SD/docling. All required model assets1 are downloaded to a local huggingface datasets cache on first use, unless you choose to pre-install the model assets in advance. Docling provides an easy code interface to convert PDF documents from file system, URLs or binary streams, and retrieve the output in either JSON or Markdown format. For convenience, separate methods are offered to convert single documents or batches of documents. A basic usage example is illustrated below. Further examples are available in the Doclign code repository. from docling. document_converter import DocumentConverter source = "https :// arxiv.org/pdf /2206.01062" # PDF path or URL converter = DocumentConverter () result = converter. convert_single (source) print(result. render_as_markdown ()) # output: "## DocLayNet: A Large Human -Annotated Dataset for Document -Layout Analysis [...]" Optionally, you can configure custom pipeline features and runtime options, such as turning on or off features (e.g. OCR, table structure recognition), enforcing limits on the input document size, and defining the budget of CPU threads. Advanced usage examples and options are documented in the README file. Docling also provides a Dockerfile to demonstrate how to install and run it inside a container. 3 Processing pipeline Docling implements a linear pipeline of operations, which execute sequentially on each given document (see Fig. 1). Each document is first parsed by a PDF backend, which retrieves the programmatic text tokens, consisting of string content and its coordinates on the page, and also renders a bitmap image of each page to support downstream operations. Then, the standard model pipeline applies a sequence of AI models independently on every page in the document to extract features and content, such as layout and table structures. Finally, the results from all pages are aggregated and passed through a post-processing stage, which augments metadata, detects the document language, infers reading-order and eventually assembles a typed document object which can be serialized to JSON or Markdown. 3.1 PDF backends Two basic requirements to process PDF documents in our pipeline are a) to retrieve all text content and their geometric coordinates on each page and b) to render the visual representation of each page as it would appear in a PDF viewer. Both these requirements are encapsulated in Docling’s PDF backend interface. While there are several open-source PDF parsing libraries available for python, we faced major obstacles with all of them for different reasons, among which were restrictive 1see huggingface.co/ds4sd/docling-models/ 2
+
+--- Page 3 ---
+
+{;} Assemble results, Serialize as Apply document JSON or Markdown post-processing Parse PDF pages Table Structure OCR Layout Analysis Model Pipeline Figure 1: Sketch of Docling’s default processing pipeline. The inner part of the model pipeline is easily customizable and extensible. licensing (e.g. pymupdf ), poor speed or unrecoverable quality issues, such as merged text cells across far-apart text tokens or table columns (pypdfium, PyPDF) [15, 14]. We therefore decided to provide multiple backend choices, and additionally open-source a custombuilt PDF parser, which is based on the low-level qpdf library. It is made available in a separate package named docling-parse and powers the default PDF backend in Docling. As an alternative, we provide a PDF backend relying on pypdfium, which may be a safe backup choice in certain cases, e.g. if issues are seen with particular font encodings. 3.2 AI models As part of Docling, we initially release two highly capable AI models to the open-source community, which have been developed and published recently by our team. The first model is a layout analysis model, an accurate object-detector for page elements . The second model is TableFormer [12, 9], a state-of-the-art table structure recognition model. We provide the pre-trained weights (hosted on huggingface) and a separate package for the inference code as docling-ibm-models. Both models are also powering the open-access deepsearch-experience, our cloud-native service for knowledge exploration tasks. Layout Analysis Model Our layout analysis model is an object-detector which predicts the bounding-boxes and classes of various elements on the image of a given page. Its architecture is derived from RT-DETR  and re-trained on DocLayNet , our popular human-annotated dataset for document-layout analysis, among other proprietary datasets. For inference, our implementation relies on the onnxruntime . The Docling pipeline feeds page images at 72 dpi resolution, which can be processed on a single CPU with sub-second latency. All predicted bounding-box proposals for document elements are post-processed to remove overlapping proposals based on confidence and size, and then intersected with the text tokens in the PDF to group them into meaningful and complete units such as paragraphs, section titles, list items, captions, figures or tables. Table Structure Recognition The TableFormer model , first published in 2022 and since refined with a custom structure token language , is a vision-transformer model for table structure recovery. It can predict the logical row and column structure of a given table based on an input image, and determine which table cells belong to column headers, row headers or the table body. Compared to earlier approaches, TableFormer handles many characteristics of tables, such as partial or no borderlines, empty cells, rows or columns, cell spans and hierarchy both on column-heading or row-heading level, tables with inconsistent indentation or alignment and other complexities. For inference, our implementation relies on PyTorch . 3
+
+--- Page 4 ---
+
+The Docling pipeline feeds all table objects detected in the layout analysis to the TableFormer model, by providing an image-crop of the table and the included text cells. TableFormer structure predictions are matched back to the PDF cells in post-processing to avoid expensive re-transcription text in the table image. Typical tables require between 2 and 6 seconds to be processed on a standard CPU, strongly depending on the amount of included table cells. OCR Docling provides optional support for OCR, for example to cover scanned PDFs or content in bitmaps images embedded on a page. In our initial release, we rely on EasyOCR , a popular thirdparty OCR library with support for many languages. Docling, by default, feeds a high-resolution page image (216 dpi) to the OCR engine, to allow capturing small print detail in decent quality. While EasyOCR delivers reasonable transcription quality, we observe that it runs fairly slow on CPU (upwards of 30 seconds per page). We are actively seeking collaboration from the open-source community to extend Docling with additional OCR backends and speed improvements. 3.3 Assembly In the final pipeline stage, Docling assembles all prediction results produced on each page into a well-defined datatype that encapsulates a converted document, as defined in the auxiliary package docling-core. The generated document object is passed through a post-processing model which leverages several algorithms to augment features, such as detection of the document language, correcting the reading order, matching figures with captions and labelling metadata such as title, authors and references. The final output can then be serialized to JSON or transformed into a Markdown representation at the users request. 3.4 Extensibility Docling provides a straight-forward interface to extend its capabilities, namely the model pipeline. A model pipeline constitutes the central part in the processing, following initial document parsing and preceding output assembly, and can be fully customized by sub-classing from an abstract baseclass (BaseModelPipeline) or cloning the default model pipeline. This effectively allows to fully customize the chain of models, add or replace models, and introduce additional pipeline configuration parameters. To use a custom model pipeline, the custom pipeline class to instantiate can be provided as an argument to the main document conversion methods. We invite everyone in the community to propose additional or alternative models and improvements. Implementations of model classes must satisfy the python Callable interface. The __call__ method must accept an iterator over page objects, and produce another iterator over the page objects which were augmented with the additional features predicted by the model, by extending the provided PagePredictions data model accordingly. 4 Performance In this section, we establish some reference numbers for the processing speed of Docling and the resource budget it requires. All tests in this section are run with default options on our standard test set distributed with Docling, which consists of three papers from arXiv and two IBM Redbooks, with a total of 225 pages. Measurements were taken using both available PDF backends on two different hardware systems: one MacBook Pro M3 Max, and one bare-metal server running Ubuntu 20.04 LTS on an Intel Xeon E5-2690 CPU. For reproducibility, we fixed the thread budget (through setting OMP NUM THREADS environment variable) once to 4 (Docling default) and once to 16 (equal to full core count on the test hardware). All results are shown in Table 1. If you need to run Docling in very low-resource environments, please consider configuring the pypdfium backend. While it is faster and more memory efficient than the default docling-parse backend, it will come at the expense of worse quality results, especially in table structure recovery. Establishing GPU acceleration support for the AI models is currently work-in-progress and largely untested, but may work implicitly when CUDA is available and discovered by the onnxruntime and 4
+
+--- Page 5 ---
+
+torch runtimes backing the Docling pipeline. We will deliver updates on this topic at in a future version of this report. Table 1: Runtime characteristics of Docling with the standard model pipeline and settings, on our test dataset of 225 pages, on two different systems. OCR is disabled. We show the time-to-solution (TTS), computed throughput in pages per second, and the peak memory used (resident set size) for both the Docling-native PDF backend and for the pypdfium backend, using 4 and 16 threads. CPU Thread budget native backend pypdfium backend TTS Pages/s Mem TTS Pages/s Mem Apple M3 Max (16 cores) 4 177 s 1.27 6.20 GB 103 s 2.18 2.56 GB 16 167 s 1.34 92 s 2.45 Intel(R) Xeon E5-2690 (16 cores) 4 375 s 0.60 6.16 GB 239 s 0.94 2.42 GB 16 244 s 0.92 143 s 1.57 5 Applications Thanks to the high-quality, richly structured document conversion achieved by Docling, its output qualifies for numerous downstream applications. For example, Docling can provide a base for detailed enterprise document search, passage retrieval or classification use-cases, or support knowledge extraction pipelines, allowing specific treatment of different structures in the document, such as tables, figures, section structure or references. For popular generative AI application patterns, such as retrieval-augmented generation (RAG), we provide quackling, an open-source package which capitalizes on Docling’s feature-rich document output to enable document-native optimized vector embedding and chunking. It plugs in seamlessly with LLM frameworks such as LlamaIndex . Since Docling is fast, stable and cheap to run, it also makes for an excellent choice to build document-derived datasets. With its powerful table structure recognition, it provides significant benefit to automated knowledge-base construction [11, 10]. Docling is also integrated within the open IBM data prep kit , which implements scalable data transforms to build large-scale multi-modal training datasets. 6 Future work and contributions Docling is designed to allow easy extension of the model library and pipelines. In the future, we plan to extend Docling with several more models, such as a figure-classifier model, an equationrecognition model, a code-recognition model and more. This will help improve the quality of conversion for specific types of content, as well as augment extracted document metadata with additional information. Further investment into testing and optimizing GPU acceleration as well as improving the Docling-native PDF backend are on our roadmap, too. We encourage everyone to propose or implement additional features and models, and will gladly take your inputs and contributions under review. The codebase of Docling is open for use and contribution, under the MIT license agreement and in alignment with our contributing guidelines included in the Docling repository. If you use Docling in your projects, please consider citing this technical report. References  J. AI. Easyocr: Ready-to-use ocr with 80+ supported languages. https://github.com/ JaidedAI/EasyOCR, 2024. Version: 1.7.0.  J. Ansel, E. Yang, H. He, N. Gimelshein, A. Jain, M. Voznesensky, B. Bao, P. Bell, D. Berard, E. Burovski, G. Chauhan, A. Chourdia, W. Constable, A. Desmaison, Z. DeVito, E. Ellison, W. Feng, J. Gong, M. Gschwind, B. Hirsh, S. Huang, K. Kalambarkar, L. Kirsch, M. Lazos, M. Lezcano, Y. Liang, J. Liang, Y. Lu, C. Luk, B. Maher, Y. Pan, C. Puhrsch, M. Reso, M. Saroufim, M. Y. Siraichi, H. Suk, M. Suo, P. Tillet, E. Wang, X. Wang, W. Wen, S. Zhang, X. Zhao, K. Zhou, R. Zou, A. Mathews, G. Chanan, P. Wu, and S. Chintala. Pytorch 2: Faster 5
+
+--- Page 6 ---
+
+machine learning through dynamic python bytecode transformation and graph compilation. In Proceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 (ASPLOS ’24). ACM, 4 2024. doi: 10.1145/3620665.3640366. URL https://pytorch.org/assets/pytorch2-2.pdf.  C. Auer, M. Dolfi, A. Carvalho, C. B. Ramis, and P. W. Staar. Delivering document conversion as a cloud service with high throughput and responsiveness. In 2022 IEEE 15th International Conference on Cloud Computing (CLOUD), pages 363–373. IEEE, 2022.  J. Berkenbilt. Qpdf: A content-preserving pdf document transformer, 2024. URL https: //github.com/qpdf/qpdf.  O. R. developers. Onnx runtime. https://onnxruntime.ai/, 2024. Version: 1.18.1.  IBM. Data Prep Kit: a community project to democratize and accelerate unstructured data preparation for LLM app developers, 2024. URL https://github.com/IBM/ data-prep-kit.  A. S. Inc. PyMuPDF, 2024. URL https://github.com/pymupdf/PyMuPDF.  J. Liu. LlamaIndex, 11 2022. URL https://github.com/jerryjliu/llama_index.  M. Lysak, A. Nassar, N. Livathinos, C. Auer, and P. Staar. Optimized Table Tokenization for Table Structure Recognition. In Document Analysis and Recognition - ICDAR 2023: 17th International Conference, San Jos´e, CA, USA, August 21–26, 2023, Proceedings, Part II, pages 37–50, Berlin, Heidelberg, Aug. 2023. Springer-Verlag. ISBN 978-3-031-41678-1. doi: 10. 1007/978-3-031-41679-8 3. URL https://doi.org/10.1007/978-3-031-41679-8_3.  L. Mishra, S. Dhibi, Y. Kim, C. Berrospi Ramis, S. Gupta, M. Dolfi, and P. Staar. Statements: Universal information extraction from tables with large language models for ESG KPIs. In D. Stammbach, J. Ni, T. Schimanski, K. Dutia, A. Singh, J. Bingler, C. Christiaen, N. Kushwaha, V. Muccione, S. A. Vaghefi, and M. Leippold, editors, Proceedings of the 1st Workshop on Natural Language Processing Meets Climate Change (ClimateNLP 2024), pages 193–214, Bangkok, Thailand, Aug. 2024. Association for Computational Linguistics. URL https://aclanthology.org/2024.climatenlp-1.15.  L. Morin, V. Weber, G. I. Meijer, F. Yu, and P. W. J. Staar. Patcid: an open-access dataset of chemical structures in patent documents. Nature Communications, 15(1):6532, August 2024. ISSN 2041-1723. doi: 10.1038/s41467-024-50779-y. URL https://doi.org/10.1038/ s41467-024-50779-y.  A. Nassar, N. Livathinos, M. Lysak, and P. Staar. Tableformer: Table structure understanding with transformers. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 4614–4623, 2022.  B. Pfitzmann, C. Auer, M. Dolfi, A. S. Nassar, and P. Staar. Doclaynet: a large humanannotated dataset for document-layout segmentation. pages 3743–3751, 2022.  pypdf Maintainers. pypdf: A Pure-Python PDF Library, 2024. URL https://github.com/ py-pdf/pypdf.  P. Team. PyPDFium2: Python bindings for PDFium, 2024. URL https://github.com/ pypdfium2-team/pypdfium2.  Y. Zhao, W. Lv, S. Xu, J. Wei, G. Wang, Q. Dang, Y. Liu, and J. Chen. Detrs beat yolos on real-time object detection, 2023. 6
+
+--- Page 7 ---
+
+Appendix In this section, we illustrate a few examples of Docling’s output in Markdown and JSON. DocLayNet: A Large Human-Annotated Dataset for DocLayNet: A Large Human-Annotated Dataset for Document-Layout Analysis Document-Layout Analysis Birgit Pfitzmann IBM Research Rueschlikon, Switzerland bpf@zurich.ibm.com Birgit Ptzmann Christoph Auer Michele Dol Christoph Auer IBM Research Rueschlikon, Switzerland cau@zurich.ibm.com IBM Research Rueschlikon, Switzerland IBM Research Rueschlikon, Switzerland IBM Research Rueschlikon, Switzerland Michele Dolfi IBM Research Rueschlikon, Switzerland dol@zurich.ibm.com bpf@zurich.ibm.com cau@zurich.ibm.com dol@zurich.ibm.com Ahmed S. Nassar IBM Research Rueschlikon, Switzerland ahn@zurich.ibm.com Ahmed S. Nassar Peter Staar IBM Research Rueschlikon, Switzerland Peter Staar IBM Research Rueschlikon, Switzerland taa@zurich.ibm.com IBM Research Rueschlikon, Switzerland arXiv:2206.01062v1 [cs.CV] 2 Jun 2022 ABSTRACT ahn@zurich.ibm.com taa@zurich.ibm.com ABSTRACT signs, signals and road markings 3 Accurate document layout analysis is a key requirement for highquality PDF document conversion. With the recent availability of public, large groundOPERATION (cont.) MODEL AY11236 Accurate document layout analysis is a key requirement for highquality PDF document conversion. With the recent availability of public, large ground-truth datasets such as PubLayNet and DocBank, deep-learning models have proven to be very eective at layout detection and segmentation. While these datasets are of adequate size to train such models, they severely lack in layout variability since they are sourced from scientic article repositories such as PubMed and arXiv only. Consequently, the accuracy of the layout segmentation drops signicantly when these models are applied on more challenging and diverse layouts. In this paper, we present DocLayNet, a new, publicly available, document-layout annotation dataset in COCO format. It contains 80863 manually annotated pages from diverse data sources to represent a wide variability in layouts. For each PDF page, the layout annotations provide labelled bounding-boxes with a choice of 11 distinct classes. DocLayNet also provides a subset of doubleand triple-annotated pages to determine the inter-annotator agreement. In multiple experiments, we provide baseline accuracy scores (in mAP) for a set of popular object detection models. We also demonstrate that these models fall approximately 10% behind the inter-annotator agreement. Furthermore, we provide evidence that DocLayNet is of sucient size. Lastly, we compare models trained on PubLayNet, DocBank and DocLayNet, showing that layout predictions of the DocLayNettrained models are more robust and thus the preferred choice for general-purpose document-layout analysis. Interpupillary Slide Adjustment Model AY11230 Model AY11234 Eyepiece SELECTING OBJECTIVE MAGNIFICATION 1. There are two objectives. The lower magnification objective has a greater depth of field and view. 2. In order to observe the specimen easily use the lower magnification objective first. Then, by rotating the case, the magnification can be changed. FOCUSING 1. Turn the focusing knob away or toward you until a clear image is viewed. 2. If the image is unclear, adjust the height of the elevator up or down, then turn the focusing knob again. In chapter 2, you and your vehicle, you learned about some of the controls in your vehicle. This chapter is a handy reference section that gives examples of the most common signs, signals and road markings that keep traffic organized and flowing smoothly. Rotating Head in this chapter truth datasets such as PubLayNet and DocBank, deep-learning models have proven to be very effective at layout detection and segmentation. While Revolving Turret • Signs Stand – regulatory signs – school, playground and crosswalk signs ZOOM MAGNIFICATION 1. Turn the zoom magnification knob to the desired magnification and field of view. 2. In most situations, it is recommended that you focus at the lowest magnification, then move to a higher magnification and re-focus as necessary. 3. If the image is not clear to both eyes at the same time, the diopter ring may need adjustment. Objectives Signs Stage Coarse Adjustment Knob these datasets are of adequate size to train such models, they severely lack in layout variability since they are sourced from scientific article Condenser Focusing Knob – lane use signs CHANGING THE INTERPUPILLARY DISTANCE 1. The distance between the observer's pupils is the interpupillary distance. 2. To adjust the interpupillary distance rotate the prism caps until both eyes coincide with the image in the eyepiece. FOCUSING 1. Remove the lens protective cover. 2. Place the specimen on the working stage. 3. Focus the specimen with the left eye first while turning the focus knob until the image appears clear and sharp. 4. Rotate the right eyepiece ring until the images in each eyepiece coincide and are sharp and clear. There are three ways to read signs: by their shape, colour and the messages printed on them. Understanding these three ways of classifying signs will help you figure out the meaning of signs that are new to you. Fine Adjustment Knob – turn control signs Lamp On/Off Switch – parking signs Stage Clip Adjustment – reserved lane signs repositories such as PubMed and arXiv only. Consequently, the accuracy of the layout segmentation drops significantly when these models are Power Cord – warning signs – object markers DIOPTER RING ADJUSTMENT 1. To adjust the eyepiece for viewing with or without eyeglasses and for differences in acuity between the right and left eyes, follow the following steps: a. Observe an image through the left eyepiece and bring a specific point into focus using the focus knob. b. By turning the diopter ring adjustment for the left eyepiece, bring the same point into sharp focus. c.Then bring the same point into focus through the right eyepiece by turning the right diopter ring. d.With more than one viewer, each viewer should note their own diopter ring position for the left and right eyepieces, then before viewing set the diopter ring adjustments to that setting. Lamp – construction signs Model AY11236 – information and destination signs Stop Yield the right-of-way applied on more challenging and diverse layouts. In this paper, we present DocLayNet , a new, publicly available, document-layout annotation dataset MICROSCOPE USAGE – railway signs • Signals BARSKA Model AY11236 is a powerful fixed power compound microscope designed for biological studies such as specimen examination. It can also be used for examining bacteria and for general clinical and medical studies and other scientific uses. – lane control signals CHANGING THE BULB 1. Disconnect the power cord. 2. When the bulb is cool, remove the oblique illuminator cap and remove the halogen bulb with cap. 3. Replace with a new halogen bulb. 4. Open the window in the base plate and replace the halogen lamp or fluorescent lamp of transmitted illuminator. – traffic lights in COCO format. It contains 80863 manually annotated pages from diverse data sources to represent a wide variability in layouts. For each PDF • Road markings School zone signs are fluorescent yellow-green Explains lane use – yellow lines CONSTRUCTION Shows driving regulations – white lines – reserved lane markings BARSKA Model AY11236 is a fixed power compound microscope. It is constructed with two optical paths at the same angle. It is equipped with transmitted illumination. By using this instrument, the user can observe specimens at magnification from 40x to 1000x by selecting the desired objective lens. Coarse and fine focus adjustments provide accuracy and image detail. The rotating head allows the user to position the eyepieces for maximum viewing comfort and easy access to all adjustment knobs. – other markings page, the layout annotations provide labelled bounding-boxes with a choice of 11 distinct classes. DocLayNet also provides a subset of doubleand USING THE VERTICAL TUBE - MODELS AY11230/11234 CHANGING THE BULB 1. Disconnect the power cord from the electrical outlet. 2. When the bulb is cool, remove the oblique illuminator cap and remove the halogen bulb with cap. 3. Replace with a new halogen bulb. 4. Open the window in the base plate and replace the halogen lamp or fluorescent lamp of transmitted illuminator. 1. The vertical tube can be used for instructional viewing or to photograph the image with a digital camera or a Shows an action that is not permitted Shows a permitted action Tells about motorist services micro TV unit 2. Loosen the retention screw, then rotate triple-annotated pages to determine the inter-annotator agreement. In multiple experiments, we provide baseline accuracy scores (in mAP) for a set the adjustment ring to change the length of the vertical tube. 3. Make sure that both the images in 14 13 Shows distance and direction of popular object detection models. We also demonstrate that these models fall approximately 10% behind the inter-annotator agreement. Warns of hazards ahead Warns of construction zones Railway crossing 29 Furthermore, we provide evidence that DocLayNet is of sufficient size. Lastly, we compare models trained on PubLayNet, DocBank and DocLayNet, AGL Energy Limited ABN 74 115 061 375 Circling Minimums AGL 2013 Financial Calendar showing that layout predictions of the DocLayNettrained models are more robust and thus the preferred choice for general-purpose document-layout 22 August 2012 2012 full year result and final dividend announced 7KHUHZDVDFKDQJHWRWKH7(536FULWHULDLQWKDWDႇHFWVFLUFOLQJDUHDGLPHQVLRQE\H[SDQGLQJWKHDUHDVWRSURYLGH improved obstacle protection. To indicate that the new criteria had been applied to a given procedure, a is placed on the circling line of minimums. The new circling tables and explanatory information is located in the Legend of the TPP. 30 August 2012 Ex-dividend trading commences 5 September 2012 Record date for 2012 final dividend 27 September 2012 Final dividend payable 23 October 2012 Annual General Meeting 7KHDSSURDFKHVXVLQJVWDQGDUGFLUFOLQJDSSURDFKDUHDVFDQEHLGHQWL¿HGE\WKHDEVHQFHRIWKH on the circling line of minima. analysis. 27 February 20131 2013 interim result and interim dividend announced 28 August 20131 2013 full year results and final dividend announced 1 Indicative dates only, subject to change/Board confirmation AGL’s Annual General Meeting will be held at the City Recital Hall, Angel Place, Sydney commencing at 10.30am on Tuesday 23 October 2012. $SSO\([SDQGHG&LUFOLQJ$SSURDFK0DQHXYHULQJ$LUVSDFH5DGLXV Table $SSO\6WDQGDUG&LUFOLQJ$SSURDFK0DQHXYHULQJ5DGLXV7DEOH CCS CONCEPTS Looking back on 175 years of looking forward. AIRPORT SKETCH The airport sketch is a depiction of the airport with emphasis on runway pattern and related information, positioned in either the lower left or lower right corner of the chart to aid pilot recognition of the airport from the air and to provide some information to aid on ground navigation of the airport. The runways are drawn to scale and oriented to true north. Runway dimensions (length and width) are shown for all active runways. FAA Chart Users’ Guide - Terminal Procedures Publication (TPP) - Terms Runway(s) are depicted based on what type and construction of the runway. Hard Surface Other Than Hard Surface Metal Surface Closed Runway Under Construction · Information systems → Document structure ; · Applied computing → Document analysis ; · Computing methodologies → Machine learning ; Stopways, Taxiways, Parking Areas Displaced Threshold Closed Pavement Water Runway Yesterday Computer vision ; Object detection ; Established in Sydney in 1837, and then known as The Australian Gas Light Company, the AGL business has an established history and reputation for serving the gas and electricity needs of Australian households. In 1841, when AGL supplied the gas to light the first public street lamp, it was reported in the Sydney Gazette as a “wonderful achievement of scientific knowledge, assisted by mechanical ingenuity.” Within two years, 165 gas lamps were lighting the City of Sydney. Taxiways and aprons are shaded grey. Other runway features that may be shown are runway numbers, runway dimensions, runway slope, arresting gear, and displaced threshold. 2WKHULQIRUPDWLRQFRQFHUQLQJOLJKWLQJ¿QDODSSURDFKEHDULQJVDLUSRUWEHDFRQREVWDFOHVFRQWUROWRZHU1$9$,'VKHOLpads may also be shown. $LUSRUW(OHYDWLRQDQG7RXFKGRZQ=RQH(OHYDWLRQ Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted without fee provided that copies are not The airport elevation is shown enclosed within a box in the upper left corner of the sketch box and the touchdown zone elevation (TDZE) is shown in the upper right corner of the sketch box. The airport elevation is the highest point of an DLUSRUW¶VXVDEOHUXQZD\VPHDVXUHGLQIHHWIURPPHDQVHDOHYHO7KH7'=(LVWKHKLJKHVWHOHYDWLRQLQWKH¿UVWIHHWRI the landing surface. Circling only approaches will not show a TDZE. made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for third-party components of this work must be honored. For all other uses, contact the owner/author(s). 114 KDD '22, August 14-18, 2022, Washington, DC, USA © 2022 Copyright held by the owner/author(s). ACM ISBN 978-1-4503-9385-0/22/08. Figure 1: Four examples of complex page layouts across different document categories https://doi.org/10.1145/3534678.3539043 CCS CONCEPTS • Information systems →Document structure; • Applied computing →Document analysis; • Computing methodologies →Machine learning; Computer vision; Object detection; Figure 1: Four examples of complex page layouts across different document categories KEYWORDS KEYWORDS PDF document conversion, layout segmentation, object-detection, data set, Machine Learning PDF document conversion, layout segmentation, object-detection, data set, Machine Learning Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for prot or commercial advantage and that copies bear this notice and the full citation on the rst page. Copyrights for third-party components of this work must be honored. For all other uses, contact the owner/author(s). KDD ’22, August 14–18, 2022, Washington, DC, USA © 2022 Copyright held by the owner/author(s). ACM ISBN 978-1-4503-9385-0/22/08. https://doi.org/10.1145/3534678.3539043 ACM Reference Format: Birgit Ptzmann, Christoph Auer, Michele Dol, Ahmed S. Nassar, and Peter Staar. 2022. DocLayNet: A Large Human-Annotated Dataset for DocumentLayout Analysis. In Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD ’22), August 14–18, 2022, Washington, DC, USA. ACM, New York, NY, USA, 9 pages. https://doi.org/10.1145/ 3534678.3539043 ACM Reference Format: Birgit Pfitzmann, Christoph Auer, Michele Dolfi, Ahmed S. Nassar, and Peter Staar. 2022. DocLayNet: A Large Human-Annotated Dataset for DocumentLayout Analysis. In Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD '22), August 14-18, 2022, Washington, DC, USA. ACM, New York, NY, USA, 9 pages. https://doi.org/10.1145/ 3534678.3539043 Figure 2: Title page of the DocLayNet paper (arxiv.org/pdf/2206.01062) - left PDF, right rendered Markdown. If recognized, metadata such as authors are appearing first under the title. Text content inside figures is currently dropped, the caption is retained and linked to the figure in the JSON representation (not shown). 7
+
+--- Page 8 ---
+
+KDD ’22, August 14–18, 2022, Washington, DC, USA Birgit Pfitzmann, Christoph Auer, Michele Dolfi, Ahmed S. Nassar, and Peter Staar Table 2: Prediction performance (mAP@0.5-0.95) of object detection networks on DocLayNet test set. The MRCNN (Mask R-CNN) and FRCNN (Faster R-CNN) models with ResNet-50 or ResNet-101 backbone were trained based on the network architectures from the detectron2 model zoo (Mask R-CNN R50, R101-FPN 3x, Faster R-CNN R101-FPN 3x), with default congurations. The YOLO implementation utilized was YOLOv5x6 . All models were initialised using pre-trained weights from the COCO 2017 dataset. human MRCNN FRCNN YOLO R50 R101 R101 v5x6 Caption 84-89 68.4 71.5 70.1 77.7 Footnote 83-91 70.9 71.8 73.7 77.2 Formula 83-85 60.1 63.4 63.5 66.2 List-item 87-88 81.2 80.8 81.0 86.2 Page-footer 93-94 61.6 59.3 58.9 61.1 Page-header 85-89 71.9 70.0 72.0 67.9 Picture 69-71 71.7 72.7 72.0 77.1 Section-header 83-84 67.6 69.3 68.4 74.6 Table 77-81 82.2 82.9 82.2 86.3 Text 84-86 84.6 85.8 85.4 88.1 Title 60-72 76.7 80.4 79.9 82.7 All 82-83 72.4 73.5 73.4 76.8 Figure 5: Prediction performance (mAP@0.5-0.95) of a Mask R-CNN network with ResNet50 backbone trained on increasing fractions of the DocLayNet dataset. The learning curve attens around the 80% mark, indicating that increasing the size of the DocLayNet dataset with similar data will not yield signicantly better predictions. to avoid this at any cost in order to have clear, unbiased baseline numbers for human document-layout annotation. Third, we introduced the feature of snapping boxes around text segments to obtain a pixel-accurate annotation and again reduce time and eort. The CCS annotation tool automatically shrinks every user-drawn box to the minimum bounding-box around the enclosed text-cells for all purely text-based segments, which excludes only Table and Picture. For the latter, we instructed annotation stato minimise inclusion of surrounding whitespace while including all graphical lines. A downside of snapping boxes to enclosed text cells is that some wrongly parsed PDF pages cannot be annotated correctly and need to be skipped. Fourth, we established a way to ag pages as rejected for cases where no valid annotation according to the label guidelines could be achieved. Example cases for this would be PDF pages that render incorrectly or contain layouts that are impossible to capture with non-overlapping rectangles. Such rejected pages are not contained in the nal dataset. With all these measures in place, experienced annotation stamanaged to annotate a single page in a typical timeframe of 20s to 60s, depending on its complexity. paper and leave the detailed evaluation of more recent methods mentioned in Section 2 for future work. In this section, we will present several aspects related to the performance of object detection models on DocLayNet. Similarly as in PubLayNet, we will evaluate the quality of their predictions using mean average precision (mAP) with 10 overlaps that range from 0.5 to 0.95 in steps of 0.05 (mAP@0.5-0.95). These scores are computed by leveraging the evaluation code provided by the COCO API . Baselines for Object Detection In Table 2, we present baseline experiments (given in mAP) on Mask R-CNN , Faster R-CNN , and YOLOv5 . Both training and evaluation were performed on RGB images with dimensions of 1025⇥1025 pixels. For training, we only used one annotation in case of redundantly annotated pages. As one can observe, the variation in mAP between the models is rather low, but overall between 6 and 10% lower than the mAP computed from the pairwise human annotations on triple-annotated pages. This gives a good indication that the DocLayNet dataset poses a worthwhile challenge for the research community to close the gap between human recognition and ML approaches. It is interesting to see that Mask R-CNN and Faster R-CNN produce very comparable mAP scores, indicating that pixel-based image segmentation derived from bounding-boxes does not help to obtain better predictions. On the other hand, the more recent Yolov5x model does very well and even out-performs humans on selected labels such as Text, Table and Picture. This is not entirely surprising, as Text, Table and Picture are abundant and the most visually distinctive in a document. 5 EXPERIMENTS The primary goal of DocLayNet is to obtain high-quality ML models capable of accurate document-layout analysis on a wide variety of challenging layouts. As discussed in Section 2, object detection models are currently the easiest to use, due to the standardisation of ground-truth data in COCO format  and the availability of general frameworks such as detectron2 . Furthermore, baseline numbers in PubLayNet and DocBank were obtained using standard object detection models such as Mask R-CNN and Faster R-CNN. As such, we will relate to these object detection methods in this Figure 3: Page 6 of the DocLayNet paper. If recognized, metadata such as authors are appearing first under the title. Elements recognized as page headers or footers are suppressed in Markdown to deliver uninterrupted content in reading order. Tables are inserted in reading order. The paragraph in ”5. Experiments” wrapping over the column end is broken up in two and interrupted by the table. 8
+
+--- Page 9 ---
+
+A B % of Total triple inter-annotator mAP @ 0.5-0.95 (%) class label Count Train Test Val All Fin Man Sci Law Pat Ten Caption 22524 2.04 1.77 2.32 84-89 40-61 86-92 94-99 95-99 69-78 n/a Footnote 6318 0.60 0.31 0.58 83-91 n/a 100 62-88 85-94 n/a 82-97 Formula 25027 2.25 1.90 2.96 83-85 n/a n/a 84-87 86-96 n/a n/a List-item 185660 17.19 13.34 15.82 87-88 74-83 90-92 97-97 81-85 75-88 93-95 Page-footer 70878 6.51 5.58 6.00 93-94 88-90 95-96 100 92-97 100 96-98 Page-header 58022 5.10 6.70 5.06 85-89 66-76 90-94 98-100 91-92 97-99 81-86 Picture 45976 4.21 2.78 5.31 69-71 56-59 82-86 69-82 80-95 66-71 59-76 Section-header 142884 12.60 15.77 12.85 83-84 76-81 90-92 94-95 87-94 69-73 78-86 Table 34733 3.20 2.27 3.60 77-81 75-80 83-86 98-99 58-80 79-84 70-85 Text 510377 45.82 49.28 45.00 84-86 81-86 88-93 89-93 87-92 71-79 87-95 Title 5071 0.47 0.30 0.50 60-72 24-63 50-63 94-100 82-96 68-79 24-56 Total 1107470 941123 99816 66531 82-83 71-74 79-81 89-94 86-91 71-76 68-85 triple triple triple triple triple triple triple interinterinterinterinterinterinter- % of % of % of annotator annotator annotator annotator annotator annotator annotator Total Total Total mAP @ mAP @ mAP @ mAP @ mAP @ mAP @ mAP @ 0.5-0.95 0.5-0.95 0.5-0.95 0.5-0.95 0.5-0.95 0.5-0.95 0.5-0.95 (%) (%) (%) (%) (%) (%) (%) class label Count Train Test Val All Fin Man Sci Law Pat Ten Caption 22524 2.04 1.77 2.32 84-89 40-61 86-92 94-99 95-99 69-78 n/a Footnote 6318 0.60 0.31 0.58 83-91 n/a 100 62-88 85-94 n/a 82-97 Formula 25027 2.25 1.90 2.96 83-85 n/a n/a 84-87 86-96 n/a n/a List-item 185660 17.19 13.34 15.82 87-88 74-83 90-92 97-97 81-85 75-88 93-95 Pagefooter 70878 6.51 5.58 6.00 93-94 88-90 95-96 100 92-97 100 96-98 Pageheader 58022 5.10 6.70 5.06 85-89 66-76 90-94 98-100 91-92 97-99 81-86 C Picture 45976 4.21 2.78 5.31 69-71 56-59 82-86 69-82 80-95 66-71 59-76 Sectionheader 142884 12.60 15.77 12.85 83-84 76-81 90-92 94-95 87-94 69-73 78-86 Table 34733 3.20 2.27 3.60 77-81 75-80 83-86 98-99 58-80 79-84 70-85 Text 510377 45.82 49.28 45.00 84-86 81-86 88-93 89-93 87-92 71-79 87-95 Title 5071 0.47 0.30 0.50 60-72 24-63 50-63 94-100 82-96 68-79 24-56 Total 1107470 941123 99816 66531 82-83 71-74 79-81 89-94 86-91 71-76 68-85 Figure 4: Table 1 from the DocLayNet paper in the original PDF (A), as rendered Markdown (B) and in JSON representation (C). Spanning table cells, such as the multi-column header ”triple interannotator mAP@0.5-0.95 (%)”, is repeated for each column in the Markdown representation (B), which guarantees that every data point can be traced back to row and column headings only by its grid coordinates in the table. In the JSON representation, the span information is reflected in the fields of each table cell (C). 9
+
+[TABLE 7.1]
+
+ |  | 
+DocLayNet:ALargeHuman-AnnotatedDatasetfor
+Document-LayoutAnalysis
+BirgitP￿tzmann ChristophAuer MicheleDol￿
+IBMResearch IBMResearch IBMResearch
+Rueschlikon,Switzerland Rueschlikon,Switzerland Rueschlikon,Switzerland
+bpf@zurich.ibm.com cau@zurich.ibm.com dol@zurich.ibm.com
+AhmedS.Nassar PeterStaar
+IBMResearch IBMResearch
+Rueschlikon,Switzerland Rueschlikon,Switzerland 2202
+ahn@zurich.ibm.com taa@zurich.ibm.com
+A A q p d d s s P s i i e u e u e u c z n g B t e b a b c e c e m p l l u M e S c i i t - c t r o t e T l y t e a , i e n h o l d t t a a R P t e e r n r a r a a D y n d g t A a n i i n F e o i a n o d n C c r g d n d s g e u a r u o T s r o m d s m c c X e u o r h u g e o i o n u m v n m p m d d r t s c o - e e e o t l e n l n n s a r s d d t i u l t y g y e a h t c o f . l n t h r a o s u i C o i o v , n d ￿ t m o n t e a v c a h n . t e a n p a e s s W r n r a s y c e s o e t l i i q h y l e o s t v y u s e i n s n e l e i v s e t w n . s n u i e W ￿ t i t h c r t h s l c o e h e y i e l a t n , a a y s b h t r s e k e h t t l t e P h a i d e h v c y u c e a l e e a k s b e t r r c e a r L e y i r c s e q n a m e u e c e y u p t r e l o ￿ N i s a a o n r d e y c s e e a t e c y i o t m r t a l t e a u o s i o v e v n t r o f a a n e i d f v i e r t t l h e a D a s a a f e r t d b o a o s i e i r u l a p l c l a a q i b B c p h t y y u h i y a l i o l o i a g n i e a u u t o t h k d y e s t t f - , MSM1 2 CD1 2 F12 3 4 C12 34 O .. .. ........ O UM1 32 1 E H H o I A . .. T TI T RFR R P DWO S Lmdeoccprcesftiaotrfi d S C A A 3 O m l G i l n h h m o e T MLilt o t o ah o tl l h h a y r b b e o e Ee u r u T ne i e p P Ih Ua u h a o N Nh a h s p e e e t D s c s N i a a e e e s n m p p t j l s a p i o C Ne o e A e l na c a o m c ic g e e eg ta u S e l t k i n g G Gq p r l t g r i E a e r n r I i h s s l d T t o c r A a Nd e l n c Gi o ne a t e h, ms y e t w o I v dg u i u E m es i e eh F c i L I I a e j n h e t n I c . d i v i d Y e N s t t t nc u C ee e s e s s if ta N N h t a T I S l uo a e N a n ch j i T ha hv te r c t e i o uo h h t t s 1 u rd s V E Cc G r r h it i g e g f t s e e et i e R a h e Ge GitHo f l r g G i t s epe h w e n . a A l 1 et o e c et h .ew e A e t c n f l n n e tut e h e o u a h E t s t if w m r m i h 2 e t Y a s b T aT te n t w c e T i . ii O t t t h n t l pe pa m et or w r er h l pu h h e A i 3 i o nu l 1 t e a H H Vit h I a e l e s t i h r p n e d B t n a h v a u ge b lr n ebo dl v i c i i 0O th t 1 g e a cp E db a E E bs t i n n n b m e e c i h . J t t e u h e s a on n in 2 m l e o h e lNo R a nea t b cii m r E w T o e t r l oTn ni nm I B b e p p i t s t b a l w t t o i s e 3 e b t fr gT C ni e e cid wh i N d e e g w o r j o e c i n t rU o y v c j a e 0 c p e g e i o a pr h c I w e T a w y i s e r gg n w e n I a i Te e e m n p a n v t L c r on n /C r f l u n e c i I t r i t .h p e p c oc t Et e u ti o s t o Bo t o h b t p h 1 p tA t, V a e a i w i a O u l s e h n lt c i t r m r i pR r hov l e e e a n e l i a i vw h ge 1 cr b , b p E La l ei t n i ee a e u c m c l c h f P l e c t tce e l a ieou y 2 n a . r o cto m l aw h h o er a n aa T t s . a e s g h U hs e c r s g N m p 3 c p i n i b e r r ,e . pn t a yr U va m n pna e m a c tu de h o Pi g 4 a d y gte r .d h le T n o ne o i o s Boh s n. e t i d f o I s er wt i ne b h r d f ac i i t t b d ea h re s c Li n oE v ca b ot k t i so g b o e t n e si h oe m r a e l L ecs go s ie i n ( t e t u r p e m n n g - e v i t h d a rrr t l u Ah kod f eo l r l i oa t g a r e n b at a o a n i o v h c b R e en tp w n n er r .t c n a t v e e. t e h a e Y gp cy i e e u t h a e r yl t o e e e . . r ' nn ee e a t s s h td r n i e n l d t F1 2 Z1 2 3 D1 C1 2 34 M ...... .... O O H I .o TITI TI WDRO O yhttvtmmnanodasa b eotafi C O A d l ) c d l f nfh hh h o u u t l o i l t n. n r be . i u e ee i p U P u e e . fe Nh e aa . M s a e ee t t r r u p i ce l d d T f o OB W t m e weiabffbvdava a m h w h c g i p c n n T e gg e n t Sl n he oo Gq d l h r nh d t ii yd nd d yryi o e e b a h s n u nn ril r E . M ee e o t A o i I s cc ye ru i i te e t t I e e t a t e j j j n e d : o nc sn t a i n iis ww h N uu s h h p R s t o t tu u u h u e i i f n c Y ff Nt p s l n A ep e n m ms ha ugu ad c t t tii o o o ss e e t h u a s s s r r f ei i c G c i 1i a rc l e e et n e Gi m r r r G r o jR . i n b g e lf u t t a t e e w s l aa l v r a a g o t ue t e y n n m f z c m mr ln 1 f g cc r e i c h a t y h u Nt I o o tt et g go. wr h o s t i s od t t i isi bT u t e h . ii 2 et h r n n n eN e u n e r c mu h e e e c e oeot rsth o I h c i i ut s a H e i o e l m u gs 3 g m e n n a g u t e y e n n n nn a h a F t l G o m b s e t li n u i i l , e s h t d g u ba E s 4 e n t t t s s e , n i m e e u a I ee u y t tt a t i f m a g a i a s f e o g s o a h h t h A onl d h C i t m y l t f n e am l o g n u n p i e m B r c h n . d p p i b o h h w n s l t e ae c t e g e e n p t At Dla h n u e o n o v o d b o o e l r U i e e u . as n , p a t og ni o m c s wa ia w s t i c tT d r r w J s r k e i , f h ng t s t g L i h o sw n tr f o i t p i l d l i ti a yU i e o I n c c h i gt ie t o n c a h c e h n ei e o e o e tBo e n t o h ii t t h m m l e O c n o a a eh a hgt o g o g e S -e a i r e p s r r bt l g i a f e r h e s , i e f t p b t a l n r h tp n e e N t a i t o T s e e i o , o c l u h i , l c c a t d a e g e n e r t o e o n t k rf d v f h o t s M w v c aa a ap r ai n f i e e r o th o prf s w n g n s o i e i e s o o b u r eih et pn w t t f d l n m d or e r m e c to E de o o p a i p ro o t r u a e s i c e . v d oj a p u t s e r t w a i t i r n v N b m e el r t u o o fe s ng no i n o i it tn l f n b i yt s a y e t o e n io o y c r n e eh r s m n v hg e t d e T t b d e o a p s r e r o w si g a be w w t r e k g k e e r o f w o ,i p u g t p h m m t m ti . p n e r d n n e f o t h r i n c w h h h ri a ll el ii t a i n h fi te ba o o e nn d r e i o e h e e i o t e i o an n rpg e e g t c n .t b f b . gg l o v n c e p r h d c tg e , o y e h r . .l w ee e d h e e t . i mw i e , e g o n oe a f s r ti h f t a d r t h d t y Iet1f Bmef B hv M C o o h M t i q x e0 A A ec ri ei a u a c 0 R R s wu O grm d I i0 u S S O sp o i c e xn s p K K is a C o n a n e N g c CFK e l n A A bd e D a l o r no o o dsy c R c r n j o tp u M Mcuw a t bd Si o s o wra e s e IE s l i m o o s n n u n O n S en O ti g t c s d dT t d tc e ml . eb t a f R l L he r LOS e et rj o i o e h g p ee a nI w e n c S e e l l u v R b r c s m e t t /i i o dt t p tn t O iA A c r i s pc l i i v g c A v l a un fh t a C l e a e Y Y f i a wUa R n s ns n sg l r r n 1 1 og n y e i evs t Y a p t d O1 1 aT S t d mer hC u n t a rh l 2 2 ii r n eo d t ld r 1 f es 3 3it g s e e o P a o tv Tw p t o6 6t HA m sdi r eedp 1de o ye E b ja i iI b dce e o u s s d s e o s i i a d s 2 M m o t O iia a a m prl ic iul l t o c ec Uo c ut e ei p f 3 s d a c i o n de g inmcN t e x o e u l n s a i s S o l d e cw r 6 s i s lna A t a b d t a e h f p u t ac Y l j A t o o r ee pa yt d 1 sfr m ic t o uit 1 o aea e h G t ue w l 2 n l aiy n s s l xd v 3 f .ge e d ia ae i 6 a E a xe nrB p m d n e t L i s ili yc m a j fee dd t i u m io sn ncc h ua S s p m uop ae i se s t gt n a tc t o .sm ip n e h i g PC n h s w oC d o o o f e ag e w on r d b o e u a CAK d r m n E SAe FAK r e dno a r at s n y rtdi f d n t ajo s na ht e u j c rerm jo d rb c eug c a p u s ss osk i b t se o i ts e s ip e i e a t e m a m n e t m l mC c m m . er n x e i e n o l ei na i e n i c p Ti a g n pt b c4 nt mns i t i h t lr mo s f 0te a d o i eu. r uc x. n e us m f n r d cI nu imtno d too s et ep i e a s ne s t t 1 . . in , 4 g onmorechallenginganddiverselayouts.Inthispaper,wepresent 3signs, signals an i• • • n S S R ––––––––––––––––– ti i o g g rspcl t p rs w o csid rlstywrmo a n a he e e u a ra c i i i r o e b t n n l a e a g g g a h n n o f a i s s g a r h h dl lon i r f s as j n rn n nl e e w i e e ys r e fi k o e us ot n tsrl k s m s s a e g r r si i c cma r l c o t w u cn inv v i wa l nr n r t o ys c o m e e l l s a ua g l ot a , i g i a g m l o e n n g d d nr tc s i h u t l a kn i s s e tkr iit to h s ns g ao r i r y i i l l r e a sn ig o oa ak i t no s rg d nn g ss s k g i n n ni n l p l n n g s s i n e a a e e s s g s g i s nsi r g n n t n g s s sd dn es n s s rIsrsaSTtot n hh eoin hf g ea f i md e c c en t g h lrm r a se ea fle Sr a, s e r e o n h npo sae s g s o w i c r ti f f u s g en w s e y ei a l t n e a i nr s h S ntg s t w g h a t e id 2 g e e o o r l r ,s s c e s n p t c i s v o mty s e o ip a i i g n oo nn yr o w g ni un o dt n o sa r ut aott ye r w. hh no s l d s i al da l y t l ti o . o d n h yg n re omy e i v lt uo pah aeru d e r s y E kvr m o x s eiev i Tseerllvsi caebsout motorist Sachtoiown Wahaerands of hazards Wcoanrsntsru ocft i on zonesRailwa nuJ 2 ]VC.sc[
+D d p a a o t g c a e L s s a e y f t r N o in e m t, C d a O i n v C e e O w rs , e f p o d u r a b m t l a i a c t s l . y o I u a t r v c c a e o i s n la t t b a o l i e n r , e s d p 8 o re 0 c s u 8 e 6 m n 3 e t n m a t a - w l n a i u y d a o e l u l v y t a a r a n i n a n b n o i o l t i t a t a t y i t o e in n d C(cid:55)it(cid:55)m mh(cid:75) (cid:75) i ie rp n (cid:72) (cid:72) c r ic(cid:85) (cid:3)m ol (cid:68) (cid:72)i i rvn (cid:83) (cid:3) ac(cid:90)eg (cid:83).lid(cid:68)n(cid:85) M (cid:82) (cid:86)go(cid:68) (cid:3) i(cid:68)bl n (cid:70)in(cid:3)s(cid:75) i(cid:70)mte(cid:72) (cid:75)a (cid:86) (cid:68)cu o(cid:3)l(cid:81)f m (cid:88)e (cid:74)m(cid:86) sp(cid:72) (cid:76)(cid:81)irn(cid:3)o(cid:87) (cid:74)i(cid:82)mt(cid:3)e(cid:3) (cid:86) (cid:87)uc(cid:87) (cid:75) (cid:68)tm(cid:72)i(cid:81)o(cid:3)s(cid:71) (cid:55)n.(cid:68) (cid:40). T(cid:85)T(cid:53) (cid:71)ho(cid:3) (cid:51)e(cid:70) i(cid:54) (cid:76)n(cid:85)n(cid:70)d(cid:3)e(cid:70) (cid:79)i(cid:76)wc(cid:85) (cid:81) (cid:76)a(cid:87) (cid:74) (cid:72)ct(cid:3)e(cid:85)i(cid:68)r(cid:76) (cid:68)c(cid:83)th(cid:3)l(cid:83)i(cid:76)n(cid:81)a(cid:85)(cid:82)g(cid:3)t(cid:21) (cid:68) tt(cid:19)h(cid:70)a(cid:20)e(cid:75)b(cid:21) (cid:3)ln(cid:68)e(cid:3)(cid:87)e(cid:85)s(cid:75) (cid:72)w (cid:68)a(cid:68) (cid:87)nc(cid:86) (cid:3)(cid:68)rd(cid:3)i(cid:70) (cid:4231)t e(cid:68)e(cid:72)r(cid:81)x(cid:70)ipa(cid:3) (cid:87) (cid:69) (cid:86)l ah(cid:72) (cid:3)(cid:70)na(cid:3) (cid:76) (cid:76) (cid:85)a(cid:71)d(cid:70)t(cid:72) (cid:79)ob(cid:76) (cid:81) (cid:81)re(cid:87)y(cid:74) (cid:76)e(cid:191) (cid:3)in(cid:68) (cid:72)n (cid:85) (cid:71)fa(cid:72)o(cid:3)p(cid:69) (cid:68)rmp(cid:92) (cid:3)(cid:71)l(cid:3)ai(cid:87) (cid:76)e(cid:75) (cid:80)tdi(cid:72)o(cid:72) (cid:3)nt(cid:68) (cid:81)o (cid:69) (cid:86)i sa(cid:76) (cid:86) (cid:82) (cid:72)lg(cid:81)o w l b a d o a l e o b e y s t j u o o e e p n r u c r p m d t t o r s i v d i o . n n i e F v g d e t o i - e e d r b t c h e b o e t s e a i x a o s c e i a n e n h s l t s i m P e w u n r D b e o i - t a s F d a h e n e c p t n a l c a s o o u g . c t f r e W h a a , d t o c o t e o y i h r c u a e e s a b l c l s g l o a o e o r y f r - e o e d e 1 a s u e m 1 n t m ( e d i d a n n o i n s t n t m n r t . s i i o I n p A t n t r l c a P a e m t t t - ) i e a c o u f l n n o l t a t h n r s s ip a o s a p e t l t r e s a s o t e . t h e v e t D x e i d d o p s o e f e e p c r p l L a m a i o m g a b o p e y e e d u s N l n l e l e t a t e l o d s s r t , A TilndR no (cid:36) H STi ai h n u ftm I a (cid:83) t o a v g eR n o r x (cid:83) r eri e p gw iA d ma w (cid:79)P nc (cid:92) w a r a i S a (cid:3) os e arO t (cid:54) a p y y ii u a gtoo y (cid:87) i ( s o r s R(cid:68) on s snn f , r a (cid:81) , ni ) t s P t T c (cid:71) oi, a so a e (cid:68) (f p r k ln r S(cid:85) eet k o (cid:71) e hn - o K(cid:3) st de (cid:38) c gfi e t Eh (cid:76) tita (cid:85) ohp h (cid:70) i Ti OH DT n ri e (cid:79) s (cid:76) cap (cid:81) h Ce a i t t s n h aao (cid:74) r er d pe de d H ir (cid:3) d r (cid:36) d ls t r a i p. S n w h e (cid:83) T c b oT u o (cid:83) p e i ha erdh r l (cid:85) d i d t a fs i (cid:82) c t e a t n hf e h (cid:68) t c r i ) (cid:70) r o d eo e u (cid:75) n a rm on (cid:3) rt (cid:48) o nweh t (cid:68) fh ea ws (cid:81) te M CP y h hl (cid:72) h o s a o ea l (cid:88) ea o w v w i (cid:89) t a s t r a a e e (cid:72) e rnt l ai m (cid:85) er y r d S (cid:76) pn (cid:81) p f e l deo u od (cid:74) e n r rfr (cid:3) r t f ta (cid:53) tt aa ao ow (cid:68) w cn l lr e (cid:71) pn d i a t (cid:76) lr (cid:88) ho otcc (cid:86) o w tv o e (cid:3) i (cid:55) vie nsm d (cid:68) C W ecr s e (cid:69) p l at r a o r r (cid:79) ih s (cid:72) luu t s g e e ao e nc h r sm a d wt t R i i no sc R ae u dn oy u o n i rsn n o (cid:36)T o w nn .f w a rf (cid:83) a eo ir b e (cid:83) at y urr h l(cid:79) y mn e n (cid:92) o e t (cid:3) w fae (cid:40) r ttda (cid:91) u hio (cid:83) y n et (cid:68) n ow p U (cid:81) c t a at (cid:71) n ho r t y (cid:72) u d a t . a (cid:71) e e er (cid:3) i r tr d (cid:38) nn C t o (cid:76) oo (cid:85) a o (cid:70) rn a n n (cid:79) t (cid:76) h s (cid:81) idg d t . (cid:74) r r r u (cid:3) R po f t L a h a l e s l r t a m l p y o , p r w r e o e , x w i c m o e m a p t r e p o l a y v r i e 1 d 0 e m % e o v b d i e d e h l e s i n n t c d r e a t i t h n h e e a d t in D o te o n r c - P L a u a n y b n N L o a t e a y t t N i o s r e o t a , f g D s r u e o ￿ e c m B ci a e e n n n t k t . s F a i n u z r d e - . Ts(cid:50)p(cid:36)Te(cid:68)th aia l(cid:76)h o (cid:76)(cid:87) e(cid:85)e (cid:85) x(cid:75) (cid:83) d e n v(cid:83) i(cid:72) (cid:82) s l ws aa (cid:82)a (cid:85) (cid:85) , t m n a(cid:3) (cid:87)i(cid:85) i (cid:76) r(cid:182) r o(cid:87)(cid:81) d(cid:86) y p ua(cid:3)n(cid:3) s(cid:73) i (cid:40)o n n(cid:88) (cid:82)y r(cid:79)( aw g(cid:86) (cid:85)(cid:72)t a T (cid:80) (cid:68) n a (cid:89)e l sD s (cid:69) d(cid:68)y (cid:68)lu o eZ(cid:79) (cid:87) (cid:72) (cid:87) r as(cid:76) v(cid:76)Ef (cid:82)b (cid:3) (cid:82) p a l a(cid:85) o(cid:81) ) e (cid:88) r c (cid:81)t po(cid:3) ii e(cid:81) (cid:70) o(cid:3)s sen (cid:68) .(cid:90) (cid:82) n h , s s (cid:81) C (cid:81) o (cid:68)h a i(cid:71) a(cid:70) s w i(cid:92)o r r (cid:3)(cid:72) rr (cid:86)c (cid:55)sw n ee(cid:85) (cid:3)lh(cid:82)(cid:81) i . (cid:80) s nn s o(cid:88)(cid:76)t (cid:81) g h (cid:72) i iw n (cid:70)n (cid:74) a (cid:68)o g (cid:75)n (cid:3)d (cid:86)t (cid:79) n (cid:71)h (cid:76) (cid:88) ge e (cid:74) le(cid:82) y(cid:85) ed n (cid:75) (cid:72) (cid:90) a cu (cid:87) a g (cid:71) (cid:76)r l (cid:81) pp (cid:81)o r, (cid:3) (cid:76) (cid:74)e pp (cid:3)s(cid:81) a (cid:61)(cid:15)y ere(cid:3) n(cid:3) o . (cid:82) (cid:73) (cid:191) rd (cid:72) d a O(cid:81)(cid:81)r (cid:72) wci (cid:68)d (cid:72) t g(cid:87)h h (cid:3) (cid:79)i i(cid:3)h (cid:3)s (cid:73)t(cid:40) e e(cid:68) (cid:85)ht p (cid:82)s r (cid:79)(cid:83) ic l (cid:72) n(cid:80) ar(cid:83) wo(cid:89) uc a (cid:85) (cid:3)r(cid:68) i n(cid:82) (cid:80) e nl l (cid:87)b w(cid:68) d e(cid:76) (cid:72)no(cid:82)(cid:70) a r(cid:68)o t (cid:75) x(cid:81) hy o(cid:81)t (cid:3) r if (cid:69) (cid:3)s f n e (cid:86) e t (cid:72) h s h(cid:72) a t (cid:68) o h he(cid:68) t(cid:85) w ou e (cid:3) (cid:76) s (cid:81) (cid:79) lr (cid:72) d u e ka (cid:74) (cid:89) . ep s (cid:86) (cid:72)T tp (cid:15)t c(cid:79) (cid:3) D(cid:17) h e (cid:68) h(cid:3)(cid:55)Z a r (cid:76) (cid:85) b t (cid:75)E (cid:83) l eo m (cid:72) (cid:82) .fxt(cid:3) (cid:85)a (cid:55) (cid:87) .c (cid:3) y (cid:39) (cid:69) To (cid:72) h b r(cid:61)n (cid:68) e e (cid:40)e (cid:70) (cid:3)a s r (cid:82) (cid:76) (cid:86) h i (cid:81) or(cid:3) o p(cid:87) (cid:15) f(cid:75) (cid:3) w o (cid:82) t(cid:72)hr n(cid:69) t(cid:3)e (cid:75) (cid:86) e a (cid:87) (cid:76)s(cid:74)l (cid:68)r ek e (cid:75) (cid:70) smreT - )PPT( noitacilbuP serudecorP lanimreT - ediuG ’sresU trahC AAF 2 A2352221Ac A o G I 778 2 30 Gn GS L md L eSFA A OA i E c L ’ pe m e sau uu n c tbt p e2 g gg it Ave e r rtoeu uu g n m0 n ue bds ss y cn am a 1 t tt eb L ti r u en 2 2 r2e i b 3 y m sa g r20 0e0 ol 2 i n t 2r F 01 11 aG e l0 y 22 3 021 i t d ,e 1 n s 2101 1un 3 Aa2 b 1 0e 1 B j n e 2 r. N c3a c t 7 t0l i o 4 M a a c 1 h l m 1 e a C n 5 e go t 0a eni/ 6 n l B 1e Tog22 2ERFA au n3 i r xe 00 0 n w n d 7 e -dc n11 1a 5 csi do ol u a2 33l dl n ir dav fi r ab df fiilrn i y u uv em dGdt il l a e 2 edl lh aet y y n iret e3oni e e ed n nm l e d a a O dftr r r orar ac pa e r r rl tt e ead sM o 2 t ys su i b n h 0u uaelt g ee l l 1be t ta r 2l ts c C ae ni 2 o na nfi i d t m 0 ng dn y id 1 namfi R2 tl fi n e ed e. n a r ni ca vl i c m i d l i t ed d i a vsedilv i ni d H vi d d e i a de n l e ln d , n d A a d a n n an n g nn o e no u l ou n P un c la nc e c ce d e ed, d Sydney Looking back on 175 years of looking forward. YEktaeItiab1nnh hc nnl s y6 e e e t th1do 5 e c m a h i 8 wA fie trb ege re4rv Gnsl i a s i cS p e1c s L t s a hy ui h m, t t s pad b l te wy a en aun uTed m hn nt ibe sh c ii et ei py ol ne a n r i neco s n l e G SA d d f i A w s sf n y a ust s s oG d gz e s r c or a h e n ee t L ri f e r e ase t e n s aes tA n y t y ul u l e i r t iu a ig lp ai v tia n a n fi s hy n pmits n c.t 1elr ” G i i gpaea n 8 k s W a , tldng t “ 3 ias iah w o ti 7 t t b t n eL wh h w , oh l iihe ag e g in s lane n o hha dgs C d d t uset e ar iwg sd tr Case t e eyf h o np ohtu, h e do o o mi yla os n f resltl p i td s o Sa ge a i s yr rhsd n. s y dt t y ,e n , d e y. 1v26010.6022:viXra
+DocLayNet,showingthatlayoutpredictionsoftheDocLayNet-
+trainedmodelsaremorerobustandthusthepreferredchoicefor 114
+general-purposedocument-layoutanalysis.
+Figure1:Fourexamplesofcomplexpagelayoutsa
+CCSCONCEPTS ferentdocumentcategories
+•Informationsystems→Documentstructure;•Appliedcom-
+puting→Documentanalysis;•Computingmethodologies
+→Machinelearning;Computervision;Objectdetection; KEYWORDS
+PDFdocumentconversion,layoutsegmentation,object
+dataset,MachineLearning
+PcfoF ol on ear r rs tp ms ha rr le i oo l s ￿￿o o smi rt t o sh ot n e urpr st ca oe u ogs mim e s e.m s ag C, kreoc ae r op nc n d yitae t i r g l ai d gc i a t h w t d a tv t li sh ta oh fe no rot orauh w gt ta he r n f i ed ra e e dr n c -/ pd o pa rp au toh i rt ve th ay is t o do cce roo ( fd smp p ) t . i ah pe raso tt nb oc ee ro napr a ts il tel ho so ifsaf t rnh teh ois int s iw oc wteo m r o akn rak dm def tu o ho s r et rp fb du e e il rslh stc or oiin ntba a o ut l ritoe eo dndr . KDD’22,August14–18,2022,Washington,DC,USA ©AhtCt 2 pM0 s 2 : 2 /I/Sd CBo oNi p .o y9r7r g i8g /-1 h10 t-.41 h51 e04 l3d 5-/9b 33y 583 t54 h-6 e07/o 82w .23/5 n03 e89 r./ 0 a 4 u 3 thor(s). ACMReferenceFormat: BirgitP￿tzmann,ChristophAuer,MicheleDol￿,AhmedS.Nass Staar.2022.DocLayNet:ALargeHuman-AnnotatedDatasetfor LayoutAnalysis.InProceedingsofthe28thACMSIGKDDCo KnowledgeDiscoveryandDataMining(KDD’22),August14–18, ington,DC,USA.ACM,NewYork,NY,USA,9pages.https://doi. 3534678.3539043 | d road markings
+nxhegaihcsmil cetphl,e laye.t osT k uhoe iflese tpach hretnar aempfdtfioe casr tb o iscor gouaamt h nmaiznoedndy
+u.g Unfisng:du bereyr stothauenti drt hisnehg am ptheeea, snceion ltgoh uroerf e as nwigdan yss
+Yield the right-of-way
+plains lane useSayercehll ooflwoulo- gzroeresneceen snitg ns
+s a permitted Sish noowt sp aenrm acitttieodn that
+y crossingSdhiroewctsio dnistance an2d9
+(cid:81)i(cid:3)cv(cid:69) (cid:70)ae(cid:72) (cid:92)tn(cid:3)e(cid:3) (cid:72) (cid:82) dp(cid:91) (cid:73) (cid:3)r(cid:83)i(cid:87)on(cid:75) (cid:68)c (cid:72) (cid:81)teh(cid:3) (cid:71)de(cid:76)u(cid:81) Lr(cid:74) eeo (cid:3)(cid:87),gn (cid:75) ae (cid:72) t nh (cid:3)(cid:68)de (cid:85) (cid:72)ocisi (cid:68)fr c (cid:86)tphl (cid:3) il(cid:87)ena(cid:82) gc(cid:3)T(cid:83)e Pl (cid:85) idn (cid:82)P e (cid:89)o.(cid:76) n(cid:71) o (cid:72) f (cid:3)
+(cid:36)(cid:83)(cid:83)(cid:85)(cid:82)(cid:68)(cid:70)(cid:75)(cid:3)(cid:48)(cid:68)(cid:81)(cid:72)(cid:88)(cid:89)(cid:72)(cid:85)(cid:76)(cid:81)(cid:74)(cid:3)(cid:36)(cid:76)(cid:85)(cid:86)(cid:83)(cid:68)(cid:70)(cid:72)(cid:3)(cid:53)(cid:68)(cid:71)(cid:76)(cid:88)(cid:86)(cid:3)
+e iuul- a nn t dwe d a y
+ction
+(cid:79)r(cid:72)u(cid:86)n(cid:15)(cid:3)w(cid:70)a(cid:82)y(cid:81) (cid:87)n(cid:85)(cid:82)u(cid:79)m(cid:3)(cid:87)(cid:82)b(cid:90)e(cid:72)rs(cid:85)(cid:15),(cid:3) (cid:49)ru(cid:36)n(cid:57)w(cid:36)a(cid:44)y(cid:39) d(cid:86)(cid:15)im(cid:3)(cid:75)e(cid:72)n(cid:79)(cid:76)--
+ve(cid:72)atc(cid:86)tih(cid:87)o(cid:3) (cid:72)nb(cid:79) (cid:72)ois(cid:89)x (cid:68) tah(cid:87)(cid:76)ne(cid:82)d (cid:81)h (cid:3)ti(cid:76)hg(cid:81)eh(cid:3)(cid:87) e(cid:75)tos(cid:72)ut(cid:3) (cid:191)cp(cid:85)ho(cid:86)di(cid:87)n(cid:3)o(cid:22)tw (cid:15)o(cid:19)nf(cid:19) a(cid:19)zn(cid:3)o(cid:73) (cid:72)n(cid:72)e(cid:87) (cid:3)(cid:82)(cid:73)(cid:3)
+crossdif-
+-detection,
+ar,andPeter
+Document-
+nferenceon
+2022,Wash-
+org/10.1145/ | DocLayNet: A Large Human-Annotated Dataset for Document-Layout Analysis
+Birgit Pfitzmann IBM Research Rueschlikon, Switzerland bpf@zurich.ibm.com
+Christoph Auer IBM Research Rueschlikon, Switzerland cau@zurich.ibm.com
+Michele Dolfi IBM Research Rueschlikon, Switzerland dol@zurich.ibm.com
+Ahmed S. Nassar IBM Research Rueschlikon, Switzerland ahn@zurich.ibm.com
+Peter Staar IBM Research Rueschlikon, Switzerland taa@zurich.ibm.com
+ABSTRACT
+Accurate document layout analysis is a key requirement for highquality PDF document conversion. With the recent availability of public, large ground-
+truth datasets such as PubLayNet and DocBank, deep-learning models have proven to be very effective at layout detection and segmentation. While
+these datasets are of adequate size to train such models, they severely lack in layout variability since they are sourced from scientific article
+repositories such as PubMed and arXiv only. Consequently, the accuracy of the layout segmentation drops significantly when these models are
+applied on more challenging and diverse layouts. In this paper, we present DocLayNet , a new, publicly available, document-layout annotation dataset
+in COCO format. It contains 80863 manually annotated pages from diverse data sources to represent a wide variability in layouts. For each PDF
+page, the layout annotations provide labelled bounding-boxes with a choice of 11 distinct classes. DocLayNet also provides a subset of double- and
+triple-annotated pages to determine the inter-annotator agreement. In multiple experiments, we provide baseline accuracy scores (in mAP) for a set
+of popular object detection models. We also demonstrate that these models fall approximately 10% behind the inter-annotator agreement.
+Furthermore, we provide evidence that DocLayNet is of sufficient size. Lastly, we compare models trained on PubLayNet, DocBank and DocLayNet,
+showing that layout predictions of the DocLayNettrained models are more robust and thus the preferred choice for general-purpose document-layout
+analysis.
+CCS CONCEPTS
+· Information systems → Document structure ; · Applied computing → Document analysis ; · Computing methodologies → Machine learning ;
+Computer vision ; Object detection ;
+Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted without fee provided that copies are not
+made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for third-party
+components of this work must be honored. For all other uses, contact the owner/author(s).
+KDD '22, August 14-18, 2022, Washington, DC, USA © 2022 Copyright held by the owner/author(s). ACM ISBN 978-1-4503-9385-0/22/08.
+https://doi.org/10.1145/3534678.3539043
+Figure 1: Four examples of complex page layouts across different document categories
+KEYWORDS
+PDF document conversion, layout segmentation, object-detection, data set, Machine Learning
+ACM Reference Format:
+Birgit Pfitzmann, Christoph Auer, Michele Dolfi, Ahmed S. Nassar, and Peter Staar. 2022. DocLayNet: A Large Human-Annotated Dataset for
+DocumentLayout Analysis. In Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD '22), August 14-18,
+2022, Washington, DC, USA. ACM, New York, NY, USA, 9 pages. https://doi.org/10.1145/ 3534678.3539043
+
+[END TABLE]
+
+
+[TABLE 7.2]
+
+ |  |  | s et ep i e a s ne s t t . . in , g • • S R ––––––– i o g rlstywrmo a e a raie t nag h ni sah dl l fanle w i e r fi e ot l k ma er sc a r w c vi l n yso melal ii g lng d nr s i a knse ith g i rl r esnak ton ssg in l n s es g s Tseerllvs Sr i c e a h e g b o s u o wl u as t t id m orni o vs t in o g ri s t Sachto E iow x n
+14 Wahaerands of hazards Wcoanrsntsru ocft i on zonesRailwa
+m ol (cid:68) (cid:72)i i rvn (cid:83) (cid:3) ac(cid:90)eg (cid:83).lid(cid:68)n(cid:85) M (cid:82) (cid:86)go(cid:68) (cid:3) i(cid:68)bl n (cid:70)in(cid:3)s(cid:75) i(cid:70)mte(cid:72) (cid:75)a (cid:86) (cid:68)cu o(cid:3)l(cid:81)f m (cid:88)e (cid:74)m(cid:86) sp(cid:72) (cid:76)(cid:81)irn(cid:3)o(cid:87) (cid:74)i(cid:82)mt(cid:3)e(cid:3) (cid:86) (cid:87)uc(cid:87) (cid:75) (cid:68)tm(cid:72)i(cid:81)o(cid:3)s(cid:71) (cid:55)n.(cid:68) (cid:40). T(cid:85)T(cid:53) (cid:71)ho(cid:3) (cid:51)e(cid:70) i(cid:54) (cid:76)n(cid:85)n(cid:70)d(cid:3)e(cid:70) (cid:79)i(cid:76)wc(cid:85) (cid:81) (cid:76)a(cid:87) (cid:74) (cid:72)ct(cid:3)e(cid:85)i(cid:68)r(cid:76) (cid:68)c(cid:83)th(cid:3)l(cid:83)i(cid:76)n(cid:81)a(cid:85)(cid:82)g(cid:3)t(cid:21) (cid:68) tt(cid:19)h(cid:70)a(cid:20)e(cid:75)b(cid:21) (cid:3)ln(cid:68)e(cid:3)(cid:87)e(cid:85)s(cid:75) (cid:72)w (cid:68)a(cid:68) (cid:87)nc(cid:86) (cid:3)(cid:68)rd(cid:3)i(cid:70) (cid:4231)t e(cid:68)e(cid:72)r(cid:81)x(cid:70)ipa(cid:3) (cid:87) (cid:69) (cid:86)l ah(cid:72) (cid:3)(cid:70)na(cid:3) (cid:76) (cid:76) (cid:85)a(cid:71)d(cid:70)t(cid:72) (cid:79)ob(cid:76) (cid:81) (cid:81)re(cid:87)y(cid:74) (cid:76)e(cid:191) (cid:3)in(cid:68) (cid:72)n (cid:85) (cid:71)fa(cid:72)o(cid:3)p(cid:69) (cid:68)rmp(cid:92) (cid:3)(cid:71)l(cid:3)ai(cid:87) (cid:76)e(cid:75) (cid:80)tdi(cid:72)o(cid:72) (cid:3)nt(cid:68) (cid:81)o (cid:69) (cid:86)i sa(cid:76) (cid:86) (cid:82) (cid:72)lg(cid:81)o
+AcoGmL’ms Aenncniunagl aGte 1n0er.3a0l Mamee otnin Tgu wesildl abye 2he3l dO actt otbheer C 2it0y1 R2e.cital Hall, Angel Place, Sydney
+Looking back on
+175 years of
+looking forward.
+YEktaeItiab1nnh hc nnl s y6 e e e t th1do 5 e c m a h i 8 wA fie trb ege re4rv Gnsl i a s i cS p e1c s L t s a hy ui h m, t t s pad b l te wy a en aun uTed m hn nt ibe sh c ii et ei py ol ne a n r i neco s n l e G SA d d f i A w s sf n y a ust s s oG d gz e s r c or a h e n ee t L ri f e r e ase t e n s aes tA n y t y ul u l e i r t iu a ig lp ai v tia n a n fi s hy n pmits n c.t 1elr ” G i i gpaea n 8 k s W a , tldng t “ 3 ias iah w o ti 7 t t b t n eL wh h w , oh l iihe ag e g in s lane n o hha dgs C d d t uset e ar iwg sd tr Case t e eyf h o np ohtu, h e do o o mi yla os n f resltl p i td s o Sa ge a i s yr rhsd n. s y dt t y ,e n , d e y. |  | A TilndR no (cid:36) H ai h u ftm I(cid:83) o a veR n r (cid:83) r erie smreT - )PPT( noitacilbuP serudecorP lanimreT - | gwd ma (cid:79)P nc (cid:92) a a i S (cid:3) osarO t (cid:54) p yii u gtoo (cid:87) i ( o r R(cid:68) on snn f r a (cid:81) ni ) t s t T c (cid:71) oi, a so e (cid:68) (f p r k ln S(cid:85) eeto (cid:71) e hn o K(cid:3) st de (cid:38) c gfi e t Eh (cid:76) tita (cid:85) ohp h (cid:70) i Ti OH n ri e (cid:79) s (cid:76) cap (cid:81) Ce a t tn h aao (cid:74) er d de d H ir (cid:3) d r (cid:36) dt r i p. S n w e (cid:83) Tb oT u (cid:83) p i ha erdh r (cid:85) it a fs i (cid:82) c t e a t n hf e h (cid:68) t c r i ) (cid:70) r o d eo e u (cid:75) n a rm on (cid:3) rt (cid:48) o nweh t (cid:68) fh ea ws (cid:81) te M y h hl (cid:72) h o s o ea (cid:88) ea w w i (cid:89) t at r a a e (cid:72) rnt l ai (cid:85) er y r S (cid:76) pn (cid:81) p fl deo u od (cid:74) e r rfr (cid:3) r f ta (cid:53) tt aa ao ow (cid:68) w cn l lr e (cid:71) pn d i a t (cid:76) lr (cid:88) ho otcc (cid:86) o w tv o e (cid:3) i (cid:55) vie nsm d (cid:68) C ecr s e (cid:69) p l at r o r r (cid:79) ih s (cid:72) luus g eao e nc h sm a d wt t i i no sc R ae dn oy u oi rsn n o (cid:36)T o nn .f w a rf (cid:83) eo ir b e (cid:83) at urr h l(cid:79) y mn e n (cid:92) o e t (cid:3) w fae (cid:40) r ttda (cid:91) u hio (cid:83) y n et (cid:68) n ow p U (cid:81) c t a at (cid:71) n ho r t y (cid:72) u d a t . a (cid:71) e e er (cid:3) i r tr d (cid:38) nn C t o (cid:76) oo (cid:85) a o (cid:70) rn a n n (cid:79) t (cid:76) h s (cid:81) idg d t . (cid:74) r r r u (cid:3) R po
+ |  | STinatgox i Ts(cid:50)p(cid:36)Te(cid:68)th aia l(cid:76)h o (cid:76)(cid:87) e(cid:85)e (cid:85) x(cid:75) (cid:83) d e n v(cid:83) i(cid:72) (cid:82) s l ediuG ’sresU trahC AAF | pAwwraeayaysss, ,P ark-DThisrpelsahcoeldd CPalovseemd e ntWater Runway
+ws aa (cid:82)a (cid:85) (cid:85) , t m n a(cid:3) (cid:87)i(cid:85) i (cid:76) r(cid:182) r o(cid:87)(cid:81) d(cid:86) y p ua(cid:3)n(cid:3) s(cid:73) i (cid:40)o n n(cid:88) (cid:82)y r(cid:79)( aw g(cid:86) (cid:85)(cid:72)t a T (cid:80) (cid:68) n a (cid:89)e l sD s (cid:69) d(cid:68)y (cid:68)lu o eZ(cid:79) (cid:87) (cid:72) (cid:87) r as(cid:76) v(cid:76)Ef (cid:82)b (cid:3) (cid:82) p a l a(cid:85) o(cid:81) ) e (cid:88) r c (cid:81)t po(cid:3) ii e(cid:81) (cid:70) o(cid:3)s sen (cid:68) .(cid:90) (cid:82) n h , s s (cid:81) C (cid:81) o (cid:68)h a i(cid:71) a(cid:70) s w i(cid:92)o r r (cid:3)(cid:72) rr (cid:86)c (cid:55)sw n ee(cid:85) (cid:3)lh(cid:82)(cid:81) i . (cid:80) s nn s o(cid:88)(cid:76)t (cid:81) g h (cid:72) i iw n (cid:70)n (cid:74) a (cid:68)o g (cid:75)n (cid:3)d (cid:86)t (cid:79) n (cid:71)h (cid:76) (cid:88) ge e (cid:74) le(cid:82) y(cid:85) ed n (cid:75) (cid:72) (cid:90) a cu (cid:87) a g (cid:71) (cid:76)r l (cid:81) pp (cid:81)o r, (cid:3) (cid:76) (cid:74)e pp (cid:3)s(cid:81) a (cid:61)(cid:15)y ere(cid:3) n(cid:3) o . (cid:82) (cid:73) (cid:191) rd (cid:72) d a O(cid:81)(cid:81)r (cid:72) wci (cid:68)d (cid:72) t g(cid:87)h h (cid:3) (cid:79)i i(cid:3)h (cid:3)s (cid:73)t(cid:40) e e(cid:68) (cid:85)ht p (cid:82)s r (cid:79)(cid:83) ic l (cid:72) n(cid:80) ar(cid:83) wo(cid:89) uc a (cid:85) (cid:3)r(cid:68) i n(cid:82) (cid:80) e nl l (cid:87)b w(cid:68) d e(cid:76) (cid:72)no(cid:82)(cid:70) a r(cid:68)o t (cid:75) x(cid:81) hy o(cid:81)t (cid:3) r if (cid:69) (cid:3)s f n e (cid:86) e t (cid:72) h s h(cid:72) a t (cid:68) o h he(cid:68) t(cid:85) w ou e (cid:3) (cid:76) s (cid:81) (cid:79) lr (cid:72) d u e ka (cid:74) (cid:89) . ep s (cid:86) (cid:72)T tp (cid:15)t c(cid:79) (cid:3) D(cid:17) h e (cid:68) h(cid:3)(cid:55)Z a r (cid:76) (cid:85) b t (cid:75)E (cid:83) l eo m (cid:72) (cid:82) .fxt(cid:3) (cid:85)a (cid:55) (cid:87) .c (cid:3) y (cid:39) (cid:69) To (cid:72) h b r(cid:61)n (cid:68) e e (cid:40)e (cid:70) (cid:3)a s r (cid:82) (cid:76) (cid:86) h i (cid:81) or(cid:3) o p(cid:87) (cid:15) f(cid:75) (cid:3) w o (cid:82) t(cid:72)hr n(cid:69) t(cid:3)e (cid:75) (cid:86) e a (cid:87) (cid:76)s(cid:74)l (cid:68)r ek e (cid:75) (cid:70)
+114
+ |  |  | 
+
+[END TABLE]
+
+
+[TABLE 8.1]
+
+KDD’22,August14–18,2022,Washington,DC,USABirgitPfitzmann,ChristophAuer,MicheleDolfi,AhmedS.Nassar,andPeterStaar
+Table2:Predictionperformance(mAP@0.5-0.95)ofobject
+detectionnetworksonDocLayNettestset.TheMRCNN
+(MaskR-CNN)andFRCNN(FasterR-CNN)modelswith
+ResNet-50orResNet-101backboneweretrainedbasedon
+thenetworkarchitecturesfromthedetectron2modelzoo
+(MaskR-CNNR50,R101-FPN3x,FasterR-CNNR101-FPN
+3x),withdefaultcon￿gurations.TheYOLOimplementation
+utilizedwasYOLOv5x6[13].Allmodelswereinitialisedus-
+ingpre-trainedweightsfromtheCOCO2017dataset.
+human MRCNN FRCNN YOLO
+R50 R101 R101 v5x6
+Caption 84-89 68.4 71.5 70.1 77.7
+Footnote 83-91 70.9 71.8 73.7 77.2
+Formula 83-85 60.1 63.4 63.5 66.2
+List-item 87-88 81.2 80.8 81.0 86.2
+Page-footer 93-94 61.6 59.3 58.9 61.1
+P P S T T T A e e a i a i l c t c l x g b l t t e t e l u i e - o r h e n e - a h d e e a r der 8 6 8 7 8 6 8 5 9 3 7 4 0 2 - - - - - - - 8 7 8 8 8 7 8 9 1 4 1 6 2 3 7 7 6 8 8 7 7 1 1 7 2 4 6 2 . . . . . . . 9 7 6 2 6 7 4 7 7 6 8 8 8 7 0 2 9 2 5 0 3 . . . . . . . 0 7 3 9 8 4 5 7 7 6 8 8 7 7 2 2 8 2 5 9 3 . . . . . . . 0 0 4 2 4 9 4 6 7 7 8 8 8 7 7 7 4 6 8 2 6 . . . . . . . 9 1 6 3 1 7 8 F R i ￿ s s n i i i a - z g g g C t e n u t f N o i e r r ￿ n e f N a c t s c 5 a h n t : a n i e e P r o t t o D r n l w e y u o s d o n c b o i r d L e c k f t a t t i t t w y h o e h N e r n i e t e 8 p h p D t 0 r e R d % o e r a d e c f m t L s o i a c N a r a t s m y i e r e o N k t t a 5 n , w e n 0 s i t n c i . b t e d d h a a ( i c m c s t k a i a m b A s ti e o P n i t n l . @ g a e T r t t 0 h h d r . a 5 a a e t - i t l n 0 a i e . n e w 9 a d c r 5 i r n ) l o e l o i n a n n f s i o g i a n n t c c M y g u r i e a t r e a h v s l s k d e e -
+toavoidthisatanycostinordertohaveclear,unbiasedbaseline
+numbersforhumandocument-layoutannotation.Third,wein- paperandleavethedetailedevaluationofmorerecentmethods
+troducedthefeatureofsnappingboxesaroundtextsegmentsto mentionedinSection2forfuturework.
+obtainapixel-accurateannotationandagainreducetimeande￿ort. Inthissection,wewillpresentseveralaspectsrelatedtothe
+TheCCSannotationtoolautomaticallyshrinkseveryuser-drawn performanceofobjectdetectionmodelsonDocLayNet.Similarly
+boxtotheminimumbounding-boxaroundtheenclosedtext-cells asinPubLayNet,wewillevaluatethequalityoftheirpredictions
+forallpurelytext-basedsegments,whichexcludesonlyTableand usingmeanaverageprecision(mAP)with10overlapsthatrange
+Picture.Forthelatter,weinstructedannotationsta￿tominimise from0.5to0.95instepsof0.05(mAP@0.5-0.95).Thesescoresare
+inclusionofsurroundingwhitespacewhileincludingallgraphical computedbyleveragingtheevaluationcodeprovidedbytheCOCO
+lines.Adownsideofsnappingboxestoenclosedtextcellsisthat API[16].
+somewronglyparsedPDFpagescannotbeannotatedcorrectlyand
+n re e je e c d te t d o f b o e r s c k a i s p e p s e w d. h F e o re ur n t o h, v w al e id e a st n a n b o li t s a h ti e o d n a a w cc a o y rd t i o ng ￿a to g t p h a e ge la s b a e s l BaselinesforObjectDetection
+guidelinescouldbeachieved.ExamplecasesforthiswouldbePDF InTable2,wepresentbaselineexperiments(giveninmAP)onMask
+pagesthatrenderincorrectlyorcontainlayoutsthatareimpossible R-CNN[12],FasterR-CNN[11],andYOLOv5[13].Bothtraining
+tocapturewithnon-overlappingrectangles.Suchrejectedpagesare andevaluationwereperformedonRGBimageswithdimensionsof
+n ex o p t e c r o i n en ta c i e n d ed an in no t t h a e ti ￿ o n n a s l t d a a ￿ ta m se a t n . a W ge i d th to all an th n e o s t e at m e e a a s s i u n r g e l s e in pa p g l e ac i e n , 1 o 0 f 2 r 5 ed⇥u 1 n 0 d 2 a 5 n p t i l x y e a ls n . n F o o t r a t t r e a d in p i a n g g e , s w . e A o s n o l n y e u c se a d n o o n b e se a r n v n e o , t t a h t e io v n ar in ia c ti a o s n e
+atypicaltimeframeof20sto60s,dependingonitscomplexity. inmAPbetweenthemodelsisratherlow,butoverallbetween6
+and10%lowerthanthemAPcomputedfromthepairwisehuman
+5 EXPERIMENTS annotationsontriple-annotatedpages.Thisgivesagoodindication
+thattheDocLayNetdatasetposesaworthwhilechallengeforthe
+TheprimarygoalofDocLayNetistoobtainhigh-qualityMLmodels researchcommunitytoclosethegapbetweenhumanrecognition
+capableofaccuratedocument-layoutanalysisonawidevariety andMLapproaches.ItisinterestingtoseethatMaskR-CNNand
+ofchallenginglayouts.AsdiscussedinSection2,objectdetection FasterR-CNNproduceverycomparablemAPscores,indicating
+modelsarecurrentlytheeasiesttouse,duetothestandardisation thatpixel-basedimagesegmentationderivedfrombounding-boxes
+ofground-truthdatainCOCOformat[16]andtheavailabilityof doesnothelptoobtainbetterpredictions.Ontheotherhand,the
+generalframeworkssuchasdetectron2[17].Furthermore,baseline morerecentYolov5xmodeldoesverywellandevenout-performs
+numbersinPubLayNetandDocBankwereobtainedusingstandard humansonselectedlabelssuchasText,TableandPicture.Thisis
+objectdetectionmodelssuchasMaskR-CNNandFasterR-CNN. notentirelysurprising,asText,TableandPictureareabundantand
+Assuch,wewillrelatetotheseobjectdetectionmethodsinthis themostvisuallydistinctiveinadocument. | 
+
+[END TABLE]
+
+
+[TABLE 8.2]
+
+ |  | 
+ |  | 
+
+[END TABLE]
+
+
+[TABLE 8.3]
+
+ | human | MRCNN FRCNN YOLO
+R50 R101 R101 v5x6
+Caption
+Footnote
+Formula
+List-item
+Page-footer
+Page-header
+Picture
+Section-header
+Table
+Text
+Title | 84-89
+83-91
+83-85
+87-88
+93-94
+85-89
+69-71
+83-84
+77-81
+84-86
+60-72 | 68.4 71.5 70.1 77.7
+70.9 71.8 73.7 77.2
+60.1 63.4 63.5 66.2
+81.2 80.8 81.0 86.2
+61.6 59.3 58.9 61.1
+71.9 70.0 72.0 67.9
+71.7 72.7 72.0 77.1
+67.6 69.3 68.4 74.6
+82.2 82.9 82.2 86.3
+84.6 85.8 85.4 88.1
+76.7 80.4 79.9 82.7
+All | 82-83 | 72.4 73.5 73.4 76.8
+
+[END TABLE]
+
+
+[TABLE 9.1]
+
+ | curren | ce(as%
+otal”)inthetrain,testandvalidationsets.Theinter-annotatoragreementiscomputedasthemAP@0.5-0.95metric
+pair A wiseannotationsfromthetriple-annotatedpages,fromwhichweobtainaccuracyranges. T trBa a b in le , t 1 e : s D t a o n c d L a v y a N lid e a t t d io a n ta s s e e t t s o . v T e h r e v i i e n w te . r A -a lo n n n g o t w at it o h r t a h g e r e fr e e m qu e e n n t c is y c o o f m ea p c u h te c d l a a s s s t h la e b e m l, A w P e @ p 0 re .5 s - e 0 n .9 t 5 th m e e re tr l i a c t i b v e e t w oc e c e u n r r p e a n i c rw e is (a e s a % nn o o f t a ro ti w on " s T o fr t o a m l") t i h n e t h tr e iple-
+annotated pages, from which we obtain accuracy ranges.
+%ofTotal tripleinter-annotatormAP@0.5-0.95(%) triple triple triple triple triple triple triple
+classlabel Count Train Test Val All Fin Man Sci Law Pat Ten inter- inter- inter- inter- inter- inter- inter-
+Caption 22524 2.04 1.77 2.32 84-89 40-61 86-92 94-99 95-99 69-78 n/a % of % of % of annotator annotator annotator annotator annotator annotator annotator
+Footnote 6318 0.60 0.31 0.58 83-91 n/a 100 62-88 85-94 n/a 82-97 Total Total Total mAP @ mAP @ mAP @ mAP @ mAP @ mAP @ mAP @
+Formula 25027 2.25 1.90 2.96 83-85 n/a n/a 84-87 86-96 n/a n/a 0.5 (% -0 ) .95 0.5 (% -0 ) .95 0.5 (% -0 ) .95 0.5 (% -0 ) .95 0.5 (% -0 ) .95 0.5 (% -0 ) .95 0.5 (% -0 ) .95
+List-item 185660 17.19 13.34 15.82 87-88 74-83 90-92 97-97 81-85 75-88 93-95
+P P a a g g e e - - f h o e o a t d e e r r 7 5 0 8 8 0 7 2 8 2 6 5 . . 5 1 1 0 5 6 . . 5 7 8 0 6 5 . . 0 0 0 6 9 8 3 5 - - 9 8 4 9 8 6 8 6 - - 9 7 0 6 9 9 5 0 - - 9 9 6 4 98- 1 1 0 0 0 0 9 9 2 1 - - 9 9 7 2 97 1 - 0 9 0 9 9 8 6 1 - - 9 8 8 6 c la la b s e s l Count Train Test Val All Fin Man Sci Law Pat Ten
+Picture 45976 4.21 2.78 5.31 69-71 56-59 82-86 69-82 80-95 66-71 59-76 Caption 22524 2.04 1.77 2.32 84-89 40-61 86-92 94-99 95-99 69-78 n/a
+Section-header 142884 12.60 15.77 12.85 83-84 76-81 90-92 94-95 87-94 69-73 78-86 Footnote 6318 0.60 0.31 0.58 83-91 n/a 100 62-88 85-94 n/a 82-97
+Table 34733 3.20 2.27 3.60 77-81 75-80 83-86 98-99 58-80 79-84 70-85 Formula 25027 2.25 1.90 2.96 83-85 n/a n/a 84-87 86-96 n/a n/a
+Text 510377 45.82 49.28 45.00 84-86 81-86 88-93 89-93 87-92 71-79 87-95
+Title 5071 0.47 0.30 0.50 60-72 24-63 50-63 94-100 82-96 68-79 24-56 List-item 185660 17.19 13.34 15.82 87-88 74-83 90-92 97-97 81-85 75-88 93-95
+Total 1107470 941123 99816 66531 82-83 71-74 79-81 89-94 86-91 71-76 68-85 P fo a o g te e r - 70878 6.51 5.58 6.00 93-94 88-90 95-96 100 92-97 100 96-98
+includepublicationrepositoriessuchasarXiv3,governmento￿P he aca ged ese -,r 58022 5.10 6.70 5.06 85-89 66-76 90-94 98-100 91-92 97-99 81-86
+companywebsitesaswellasdatadirectoryservicesfor￿nancial
+C reportsandpatents.ScanneddocumentswereexcludedwherPeivcteurre 45976 4.21 2.78 5.31 69-71 56-59 82-86 69-82 80-95 66-71 59-76
+p al o lo ss w ib u le s b to ec p a e u r s fo e r t m he a y n c n a o n ta b ti e on ro w ta i t t e h d re o c r t s a k n e g w ul e a d r . b T o h u i n s d w in o g u - l b d o S he ne xa c e o d ti s o e tn r - 142884 12.60 15.77 12.85 83-84 76-81 90-92 94-95 87-94 69-73 78-86
+andthereforecomplicatetheannotationprocess. Table 34733 3.20 2.27 3.60 77-81 75-80 83-86 98-99 58-80 79-84 70-85
+PreparationworkincludeduploadingandparsingthesouTrecxetd 510377 45.82 49.28 45.00 84-86 81-86 88-93 89-93 87-92 71-79 87-95
+PDFdocumentsintheCorpusConversionService(CCS)[22],a
+cloud-nativeplatformwhichprovidesavisualannotationinterTfiatlece 5071 0.47 0.30 0.50 60-72 24-63 50-63 94-100 82-96 68-79 24-56
+andallowsfordatasetinspectionandanalysis.TheannotatioTnotianl- 1107470 941123 99816 66531 82-83 71-74 79-81 89-94 86-91 71-76 68-85
+terfaceofCCSisshowninFigure3.Thedesiredbalanceofpages
+betweenthedi￿erentdocumentcategorieswasachievedbyse-
+lectivesubsamplingofpageswithcertaindesiredproperties.For
+example,wemadesuretoincludethetitlepageofeachdocument
+andbiastheremainingpageselectiontothosewith￿guresor
+tables.Thelatterwasachievedbyleveragingpre-trainedobject
+detectionmodelsfromPubLayNet,whichhelpedusestimatehow
+many￿guresandtablesagivenpagecontains.
+Phase2:Labelselectionandguideline.Wereviewedthecol-
+lecteddocumentsandidenti￿edthemostcommonstructuralfea-
+turestheyexhibit.Thiswasachievedbyidentifyingrecurrentlayout
+elementsandleadustothede￿nitionof11distinctclasslabels.
+CorpusConversionServiceannotationuserinter- These11classlabelsareCaption,Footnote,Formula,List-item,Page-
+PDFpageisshowninthebackground,withover- footer,Page-header,Picture,Section-header,Table,Text,andTitle.
+cells(indarkershades).Theannotationboxescan Criticalfactorsthatwereconsideredforthechoiceoftheseclass
+bydraggingarectangleovereachsegmentwith labelswere(1)theoveralloccurrenceofthelabel,(2)thespeci￿city
+ctivelabelfromthepaletteontheright. ofthelabel,(3)recognisabilityonasinglepage(i.e.noneedfor
+contextfrompreviousornextpage)and(4)overallcoverageofthe
+page.Speci￿cityensuresthatthechoiceoflabelisnotambiguous,
+tedtheannotationworkloadandperformedcontinuous whilecoverageensuresthatallmeaningfulitemsonapagecan
+trols.Phaseoneandtworequiredasmallteamofexperts beannotated.Werefrainedfromclasslabelsthatareveryspeci￿c
+hasesthreeandfour,agroupof40dedicatedannotators toadocumentcategory,suchasAbstractintheScienti￿cArticles | .5-0.9
+n
+a
+7
+a
+5
+8
+6
+6
+6
+5
+5
+6
+5
+ernme
+esfor
+uded
+Thisw
+oundi
+ngthe
+e(CC
+tation
+eanno
+alance
+achiev
+prope | 5metric
+T trBa b le 1 : D o c L a y N e t d a ta s e t o v e r v i e w . A lo n g w it h t h e fr e qu e n c y o f ea c h c l a s s la b e l, w e p re s e n t th e re l a t i v e oc c u r r e n c e (a s % o f ro w " T o t a l") i n t h e
+a in , t e s t a n d v a lid a t io n s e t s . T h e i n te r -a n n o t at o r a g r e e m e n t is c o m p u te d a s t h e m A P @ 0 .5 - 0 .9 5 m e tr i c b e t w e e n p a i rw is e a nn o t a ti on s fr o m t h e tr iple-
+annotated pages, from which we obtain accuracy ranges.
+triple triple triple triple triple triple triple
+inter- inter- inter- inter- inter- inter- inter-
+% of % of % of annotator annotator annotator annotator annotator annotator annotator
+Total Total Total mAP @ mAP @ mAP @ mAP @ mAP @ mAP @ mAP @
+0.5-0.95 0.5-0.95 0.5-0.95 0.5-0.95 0.5-0.95 0.5-0.95 0.5-0.95
+(%) (%) (%) (%) (%) (%) (%)
+c la la b s e s l Count Train Test Val All Fin Man Sci Law Pat Ten
+Caption 22524 2.04 1.77 2.32 84-89 40-61 86-92 94-99 95-99 69-78 n/a
+Footnote 6318 0.60 0.31 0.58 83-91 n/a 100 62-88 85-94 n/a 82-97
+Formula 25027 2.25 1.90 2.96 83-85 n/a n/a 84-87 86-96 n/a n/a
+List-item 185660 17.19 13.34 15.82 87-88 74-83 90-92 97-97 81-85 75-88 93-95
+P fo a o g te e r - 70878 6.51 5.58 6.00 93-94 88-90 95-96 100 92-97 100 96-98
+nto￿P he aca ged ese -,r 58022 5.10 6.70 5.06 85-89 66-76 90-94 98-100 91-92 97-99 81-86
+￿nancial
+wherPeivcteurre 45976 4.21 2.78 5.31 69-71 56-59 82-86 69-82 80-95 66-71 59-76
+n o g u - l b d o S he ne xa c e o d ti s o e tn r - 142884 12.60 15.77 12.85 83-84 76-81 90-92 94-95 87-94 69-73 78-86
+Table 34733 3.20 2.27 3.60 77-81 75-80 83-86 98-99 58-80 79-84 70-85
+souTrecxetd 510377 45.82 49.28 45.00 84-86 81-86 88-93 89-93 87-92 71-79 87-95
+S)[22],a
+interTfiatlece 5071 0.47 0.30 0.50 60-72 24-63 50-63 94-100 82-96 68-79 24-56
+tatioTnotianl- 1107470 941123 99816 66531 82-83 71-74 79-81 89-94 86-91 71-76 68-85
+ofpages
+edbyse-
+rties.For
+
+[END TABLE]
+
+
+[TABLE 9.2]
+
+classlabel | Count | %ofTotal
+Train Test Val | tripleinter-annotatormAP@0.5-0.95(%)
+All Fin Man Sci Law Pat Te | n
+Caption
+Footnote
+Formula
+List-item
+Page-footer
+Page-header
+Picture
+Section-header
+Table
+Text
+Title | 22524
+6318
+25027
+185660
+70878
+58022
+45976
+142884
+34733
+510377
+5071 | 2.04 1.77 2.32
+0.60 0.31 0.58
+2.25 1.90 2.96
+17.19 13.34 15.82
+6.51 5.58 6.00
+5.10 6.70 5.06
+4.21 2.78 5.31
+12.60 15.77 12.85
+3.20 2.27 3.60
+45.82 49.28 45.00
+0.47 0.30 0.50 | 84-89 40-61 86-92 94-99 95-99 69-78 n/
+83-91 n/a 100 62-88 85-94 n/a 82-9
+83-85 n/a n/a 84-87 86-96 n/a n/
+87-88 74-83 90-92 97-97 81-85 75-88 93-9
+93-94 88-90 95-96 100 92-97 100 96-9
+85-89 66-76 90-94 98-100 91-92 97-99 81-8
+69-71 56-59 82-86 69-82 80-95 66-71 59-7
+83-84 76-81 90-92 94-95 87-94 69-73 78-8
+77-81 75-80 83-86 98-99 58-80 79-84 70-8
+84-86 81-86 88-93 89-93 87-92 71-79 87-9
+60-72 24-63 50-63 94-100 82-96 68-79 24-5 | a
+7
+a
+5
+8
+6
+6
+6
+5
+5
+6
+Total | 1107470 | 941123 99816 66531 | 82-83 71-74 79-81 89-94 86-91 71-76 68-8 | 5
+
+[END TABLE]
+
+
+[TABLE 9.3]
+
+ |  | % of
+Total | % of
+Total | % of
+Total | triple
+inter-
+annotator
+mAP @
+0.5-0.95
+(%) | triple
+inter-
+annotator
+mAP @
+0.5-0.95
+(%) | triple
+inter-
+annotator
+mAP @
+0.5-0.95
+(%) | triple
+inter-
+annotator
+mAP @
+0.5-0.95
+(%) | triple
+inter-
+annotator
+mAP @
+0.5-0.95
+(%) | triple
+inter-
+annotator
+mAP @
+0.5-0.95
+(%) | triple
+inter-
+annotator
+mAP @
+0.5-0.95
+(%)
+class
+label | Count | Train | Test | Val | All | Fin | Man | Sci | Law | Pat | Ten
+Caption | 22524 | 2.04 | 1.77 | 2.32 | 84-89 | 40-61 | 86-92 | 94-99 | 95-99 | 69-78 | n/a
+Footnote | 6318 | 0.60 | 0.31 | 0.58 | 83-91 | n/a | 100 | 62-88 | 85-94 | n/a | 82-97
+Formula | 25027 | 2.25 | 1.90 | 2.96 | 83-85 | n/a | n/a | 84-87 | 86-96 | n/a | n/a
+List-item | 185660 | 17.19 | 13.34 | 15.82 | 87-88 | 74-83 | 90-92 | 97-97 | 81-85 | 75-88 | 93-95
+Page-
+footer | 70878 | 6.51 | 5.58 | 6.00 | 93-94 | 88-90 | 95-96 | 100 | 92-97 | 100 | 96-98
+o￿P aca ged ese -,r
+he | 58022 | 5.10 | 6.70 | 5.06 | 85-89 | 66-76 | 90-94 | 98-100 | 91-92 | 97-99 | 81-86
+ancial
+erPeivcteurre | 45976 | 4.21 | 2.78 | 5.31 | 69-71 | 56-59 | 82-86 | 69-82 | 80-95 | 66-71 | 59-76
+ldSnecotiotn-
+bohexaedser | 142884 | 12.60 | 15.77 | 12.85 | 83-84 | 76-81 | 90-92 | 94-95 | 87-94 | 69-73 | 78-86
+Table | 34733 | 3.20 | 2.27 | 3.60 | 77-81 | 75-80 | 83-86 | 98-99 | 58-80 | 79-84 | 70-85
+uTrecxetd | 510377 | 45.82 | 49.28 | 45.00 | 84-86 | 81-86 | 88-93 | 89-93 | 87-92 | 71-79 | 87-95
+22],a
+erTfiatlece | 5071 | 0.47 | 0.30 | 0.50 | 60-72 | 24-63 | 50-63 | 94-100 | 82-96 | 68-79 | 24-56
+oTnotianl- | 1107470 | 941123 | 99816 | 66531 | 82-83 | 71-74 | 79-81 | 89-94 | 86-91 | 71-76 | 68-85
+
+[END TABLE]
+
+
+[TABLE 9.4]
+
+ | C | 
+ |  | 
+
+[END TABLE]
+
+
+[TABLE 9.5]
+
+ | Phase2:Labelselectionandguideline.Werevi
+
+[END TABLE]
