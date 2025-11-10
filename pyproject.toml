@@ -22,6 +22,7 @@ sqlalchemy = "^2"
 psycopg = {extras = ["binary"], version = "^3.2.12"}
 loguru = "^0.7.3"
 pgvector = "^0.4.1"
+pydantic-settings = "^2.11.0"
 
 
 [tool.poetry.group.dev.dependencies]
