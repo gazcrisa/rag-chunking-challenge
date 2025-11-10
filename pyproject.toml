@@ -21,6 +21,7 @@ alembic = "^1.17.1"
 sqlalchemy = "^2"
 psycopg = {extras = ["binary"], version = "^3.2.12"}
 loguru = "^0.7.3"
+pgvector = "^0.4.1"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -28,6 +29,7 @@ pytest = "^9.0.0"
 black = "^25.9.0"
 isort = "^7.0.0"
 mypy = "^1.18.2"
+autoflake = "^2.3.1"
 
 [build-system]
 requires = ["poetry-core"]

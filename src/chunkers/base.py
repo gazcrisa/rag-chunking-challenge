@@ -30,7 +30,6 @@ class BaseChunker(ABC):
               - 'text': the chunk content
               - 'meta': optional metadata (page, section, etc.)
         """
-        pass
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(chunk_size={self.chunk_size}, overlap={self.overlap})"

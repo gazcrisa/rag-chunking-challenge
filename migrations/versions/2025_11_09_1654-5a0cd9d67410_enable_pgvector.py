@@ -11,3 +11,7 @@ down_revision = None
 
 def upgrade():
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
+
+def downgrade():
+    op.execute("DROP EXTENSION IF EXISTS vector")
