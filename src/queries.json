@@ -1,0 +1,29 @@
+{
+  "queries": [
+    {
+      "id": "T1",
+      "source": "tesla_10k_excerpt",
+      "question": "What are the main components of Tesla’s electric powertrain, and how do they operate together as a system?"
+    },
+    {
+      "id": "T2",
+      "source": "tesla_10k_excerpt",
+      "question": "Which companies does Tesla mention as partners for its powertrain sales, and how is this linked to its DOE Loan Facility?"
+    },
+    {
+      "id": "T3",
+      "source": "tesla_10k_excerpt",
+      "question": "What characteristics of Tesla’s battery pack give it an advantage over other electric vehicles?"
+    },
+    {
+      "id": "T4",
+      "source": "tesla_10k_excerpt",
+      "question": "How many patents and patent applications did Tesla have as of December 31, 2011, and in which areas?"
+    },
+    {
+      "id": "T5",
+      "source": "tesla_10k_excerpt",
+      "question": "What is Tesla’s planned vehicle platform strategy for future models like the Model X, and what are its intended benefits?"
+    }
+  ]
+}

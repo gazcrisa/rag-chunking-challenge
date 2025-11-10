@@ -10,13 +10,11 @@ from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
-
 class ChunkStrategy(StrEnum):
-    FIXED = "fixed"
-    SENTENCE = "sentence"
-    SEMANTIC = "semantic"
-    SLIDING_WINDOW = "sliding_window"
-
+    FIXED = "FIXED"
+    SENTENCE = "SENTENCE"
+    SEMANTIC = "SEMANTIC"
+    SLIDING_WINDOW = "SLIDING_WINDOW"
 
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
@@ -28,6 +26,3 @@ class DocumentChunk(Base):
     embedding = Column(Vector(1536), nullable=False)
     strategy = Column(SAEnum(ChunkStrategy, name="chunk_strategy"), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-
-    def __repr__(self):
-        return f"<Embedding(id={self.id}, doc='{self.document_name}', idx={self.chunk_index}, strategy='{self.strategy}')>"

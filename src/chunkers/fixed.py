@@ -1,10 +1,9 @@
-import pathlib
 from typing import Any
 
 from src.chunkers.base import BaseChunker
 
 
-class NaiveChunker(BaseChunker):
+class FixedChunker(BaseChunker):
     """
     A simple baseline chunker that splits text into fixed-size word chunks.
 
@@ -33,20 +32,3 @@ class NaiveChunker(BaseChunker):
             chunks.append(chunk)
 
         return chunks
-
-
-if __name__ == "__main__":
-
-    data_dir = pathlib.Path(__file__).resolve().parents[2] / "data" / "processed"
-    sample_path = data_dir / "arxiv_paper.txt"
-
-    if not sample_path.exists():
-        print(f"Sample file not found: {sample_path}")
-        exit(1)
-
-    text = sample_path.read_text(encoding="utf-8")
-    chunker = NaiveChunker(chunk_size=300, overlap=50)
-    chunks = chunker.chunk(text)
-
-    print(f"Created {len(chunks)} chunks")
-    print(f"First chunk (preview):\n\n{chunks[0]['text'][:500]}...")

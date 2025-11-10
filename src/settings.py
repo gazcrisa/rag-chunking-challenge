@@ -4,8 +4,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # OpenAI
     openai_api_key: str | None = None
     openai_embeddings_model: str = "text-embedding-3-small"
+    # Postgres
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+    postgres_server: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str = "postgres"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -14,11 +21,13 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    def build_sync_sqlalchemy_url(self) -> str:
+        return (
+            f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_server}:{self.postgres_port}/{self.postgres_db}"
+        )
+
 
 @cache
 def get_settings() -> Settings:
-    """Return the single instance of the application settings."""
-
-    # We initialize Settings without any arguments,
-    # because the arguments must be set in the environment or the server should crash.
     return Settings()

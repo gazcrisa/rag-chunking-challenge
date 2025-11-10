@@ -1,29 +1,13 @@
 from __future__ import annotations
 
-import os
-
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, text
+
+from src.database import get_db
+from src.models import ChunkStrategy
+from src.services.retrieval import RetrievalService
 
 app = FastAPI(title="RAG Retrieval API")
-
-
-# Build DATABASE_URL from environment if not explicitly provided
-def _build_database_url() -> str | None:
-    url = os.environ.get("DATABASE_URL")
-    if url:
-        return url
-    user = os.environ.get("POSTGRES_USER", "postgres")
-    password = os.environ.get("POSTGRES_PASSWORD", "postgres")
-    host = (
-        os.environ.get("POSTGRES_SERVER")
-        or os.environ.get("POSTGRES_HOST")
-        or "localhost"
-    )
-    port = os.environ.get("POSTGRES_PORT", "5432")
-    db = os.environ.get("POSTGRES_DB", "postgres")
-    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db}"
 
 
 app.add_middleware(
@@ -34,24 +18,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATABASE_URL = _build_database_url()
-engine = create_engine(DATABASE_URL) if DATABASE_URL else None
-
-
-@app.get("/health")
+@app.get("/")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/")
-def root() -> dict[str, str]:
-    return {"message": "Hello from FastAPI"}
-
-
-@app.get("/db")
-def db_check() -> dict[str, int] | dict[str, str]:
-    if engine is None:
-        return {"error": "DATABASE_URL not configured"}
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT 1")).scalar_one()
-    return {"result": int(result)}
+@app.get("/search")
+def search(
+    q: str = Query(..., description="User query"),
+    strategy: ChunkStrategy = Query(default=ChunkStrategy.FIXED),
+    top_k: int = Query(3),
+    db=Depends(get_db),
+):
+    results = RetrievalService(db).search(q, top_k=top_k, strategy=strategy)
+    return {"query": q, "results": results}

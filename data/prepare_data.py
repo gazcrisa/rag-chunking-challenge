@@ -2,149 +2,20 @@ import re
 import sys
 from pathlib import Path
 
-import fitz  # PyMuPDF
-import pdfplumber
 from bs4 import BeautifulSoup
 
 """
 Data preparation script for RAG Chunking Challenge.
 
-Converts raw PDF and HTML files to clean text format for chunking evaluation.
+Converts Tesla 10-K HTML to clean text format for chunking evaluation.
 
 This script:
-1. Extracts text from ArXiv PDF using PyMuPDF (fitz) for better structure
-   and pdfplumber for table extraction.
-2. Parses Tesla 10-K HTML using BeautifulSoup.
-3. Cleans, normalizes, and writes results to data/processed/.
+1. Parses Tesla 10-K HTML using BeautifulSoup.
+2. Cleans, normalizes, and writes results to data/processed/.
 
 Usage:
     python data/prepare_data.py
 """
-
-
-# -----------------------------------------------------------------------------
-# Utility functions
-# -----------------------------------------------------------------------------
-def normalize_pdf_text(text: str) -> str:
-    """Clean ligatures, encoding artifacts, and spacing issues."""
-    replacements = {
-        "ﬁ": "fi",
-        "ﬂ": "fl",
-        "ﬀ": "ff",
-        "ﬃ": "ffi",
-        "ﬄ": "ffl",
-        "￿": "",
-    }
-    for bad, good in replacements.items():
-        text = text.replace(bad, good)
-
-    # Normalize Unicode & whitespace
-    text = re.sub(r"\s+", " ", text)
-    # Merge hyphenated line breaks (e.g., "in-\ntelligence" → "intelligence")
-    text = re.sub(r"(?<=\w)- (?=\w)", "", text)
-    # Remove citation brackets like [12]
-    text = re.sub(r"\[\d+\]", "", text)
-    return text.strip()
-
-
-def format_table_as_text(table):
-    """Convert extracted table to simple text format."""
-    if not table:
-        return ""
-    lines = []
-    for row in table:
-        cleaned_row = [str(cell).strip() if cell else "" for cell in row]
-        lines.append(" | ".join(cleaned_row))
-    return "\n".join(lines)
-
-
-def postprocess_text(full_text: str) -> str:
-    """
-    Optional final cleanup before chunking.
-
-    Removes duplicates, stray control characters, and fixes newlines.
-    """
-    # Remove stray non-ASCII characters
-    full_text = re.sub(r"[^\x00-\x7F]+", " ", full_text)
-    # Collapse multiple spaces/newlines
-    full_text = re.sub(r"\s{2,}", " ", full_text)
-    # Trim extra whitespace after newlines
-    full_text = re.sub(r"(?<=\n)\s+", "", full_text)
-    # Remove any accidental duplicated "Page X" markers
-    full_text = re.sub(r"(--- Page \d+ ---\s*){2,}", r"\1", full_text)
-    return full_text.strip()
-
-
-# -----------------------------------------------------------------------------
-# PDF (ArXiv) conversion
-# -----------------------------------------------------------------------------
-def convert_arxiv_pdf():
-    """
-    Convert ArXiv PDF to clean text.
-
-    Uses PyMuPDF for high-quality text extraction and pdfplumber
-    for table extraction. Saves results to data/processed/.
-    """
-    print("Converting ArXiv paper (via PyMuPDF + pdfplumber)...")
-
-    script_dir = Path(__file__).parent
-    pdf_path = script_dir / "raw" / "arxiv_paper.pdf"
-    output_path = script_dir / "processed" / "arxiv_paper.txt"
-
-    if not pdf_path.exists():
-        print(f"  ❌ {pdf_path} not found")
-        return False
-
-    try:
-        text_parts = []
-
-        # ---------- Main text extraction ----------
-        doc = fitz.open(pdf_path)
-        print(f"  📄 Processing {len(doc)} pages...")
-
-        for page_num, page in enumerate(doc, 1):
-            # Extract blocks of text (layout-aware)
-            blocks = page.get_text("blocks")
-            blocks = sorted(
-                blocks, key=lambda b: (b[1], b[0])
-            )  # sort top-down, left-right
-
-            page_text = "\n".join(block[4] for block in blocks if block[4].strip())
-            page_text = normalize_pdf_text(page_text)
-
-            text_parts.append(f"\n--- Page {page_num} ---\n")
-            text_parts.append(page_text)
-
-        doc.close()
-
-        # ---------- Table extraction ----------
-        with pdfplumber.open(pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages, 1):
-                tables = page.extract_tables()
-                if tables:
-                    print(f"  📊 Found {len(tables)} table(s) on page {page_num}")
-                    for i, table in enumerate(tables, 1):
-                        text_parts.append(f"\n[TABLE {page_num}.{i}]\n")
-                        text_parts.append(format_table_as_text(table))
-                        text_parts.append("\n[END TABLE]\n")
-
-        # ---------- Write output ----------
-        full_text = "\n".join(text_parts)
-        # full_text = postprocess_text(full_text)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(full_text, encoding="utf-8")
-
-        file_size_kb = len(full_text) / 1024
-        print(f"  ✓ Extracted {file_size_kb:.1f} KB of text")
-        print(f"  ✓ Saved to {output_path.relative_to(script_dir.parent)}")
-        return True
-
-    except Exception as e:
-        print(f"  ❌ Error processing PDF: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
 
 
 # -----------------------------------------------------------------------------
@@ -239,14 +110,11 @@ def convert_tesla_10k():
 # -----------------------------------------------------------------------------
 def main():
     print("=" * 70)
-    print(" RAG Chunking Challenge - Data Preparation")
+    print(" RAG Chunking Challenge - Data Preparation (Tesla 10-K only)")
     print("=" * 70)
     print()
 
-    tasks = [
-        ("ArXiv Paper (PDF)", convert_arxiv_pdf),
-        ("Tesla 10-K (HTML)", convert_tesla_10k),
-    ]
+    tasks = [("Tesla 10-K (HTML)", convert_tesla_10k)]
 
     results = []
     for name, func in tasks:

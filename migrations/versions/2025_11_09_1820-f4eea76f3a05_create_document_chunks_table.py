@@ -16,7 +16,7 @@ down_revision = "5a0cd9d67410"
 def upgrade():
 
     # Create enum for strategy
-    chunk_strategy = ["fixed", "sentence", "semantic", "sliding_window"]
+    chunk_strategy = ["FIXED", "SENTENCE", "SEMANTIC", "SLIDING_WINDOW"]
     sa.Enum(*chunk_strategy, name="chunk_strategy").create(op.get_bind())
 
     # Create document_chunks table
