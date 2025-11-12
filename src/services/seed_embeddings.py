@@ -11,7 +11,7 @@ from openai import OpenAI
 from src.chunkers.fixed import FixedChunker
 from src.chunkers.semantic import SemanticChunker
 from src.chunkers.sentence import SentenceChunker
-from src.database import db_session
+from src.database import get_db
 from src.models import ChunkStrategy, DocumentChunk
 from src.settings import get_settings
 
@@ -65,7 +65,7 @@ def seed_embeddings():
         logger.info("Using FixedChunker with fixed-size chunking")
         chunker = FixedChunker(chunk_size=500)
 
-    with db_session() as session:
+    with get_db() as session:
         for path in DATA_DIR.glob("*.txt"):
             logger.info(f"Processing {path.name}...")
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.database import db_session
+from src.database import get_db
 from src.models import ChunkStrategy
 from src.services.retrieval import RetrievalService
 
@@ -22,7 +22,7 @@ def run_evaluation(strategy: ChunkStrategy) -> dict:
     """Run retrieval evaluation for the given chunking strategy."""
     logger.info(f"Running retrieval evaluation (strategy={strategy.value})...")
 
-    with db_session() as session:
+    with get_db() as session:
         service = RetrievalService(session)
 
         with open(QUERIES_PATH, "r", encoding="utf-8") as f:
