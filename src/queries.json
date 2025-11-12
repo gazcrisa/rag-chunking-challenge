@@ -1,29 +1,34 @@
 {
   "queries": [
     {
-      "id": "T1",
-      "source": "tesla_10k_excerpt",
-      "question": "What are the main components of Tesla’s electric powertrain, and how do they operate together as a system?"
+      "id": "1",
+      "source": "tesla_10k_2024",
+      "question": "What were Tesla's total revenues in 2024, and how does this compare to the prior year? What were the primary factors that contributed to the change?",
+      "why_this_tests_chunking": "Tests handling of cross-references - the answer requires information from multiple sections (financial overview + management discussion). Naive chunking may split the revenue number from its year-over-year comparison and explanatory context."
     },
     {
-      "id": "T2",
-      "source": "tesla_10k_excerpt",
-      "question": "Which companies does Tesla mention as partners for its powertrain sales, and how is this linked to its DOE Loan Facility?"
+      "id": "2",
+      "source": "tesla_10k_2024",
+      "question": "According to the risk factors section, what specific challenges does Tesla face related to battery cell supply and manufacturing, and how might these impact their vehicle production?",
+      "why_this_tests_chunking": "Tests preservation of document structure and semantic boundaries. The risk factors section contains multiple interrelated paragraphs about supply chain, manufacturing, and production that naive chunking might separate, breaking the logical flow between cause (battery supply issues) and effect (production impact)."
     },
     {
-      "id": "T3",
-      "source": "tesla_10k_excerpt",
-      "question": "What characteristics of Tesla’s battery pack give it an advantage over other electric vehicles?"
+      "id": "3",
+      "source": "tesla_10k_2024",
+      "question": "What are the employment targets and financial commitments Tesla must meet under their agreement with SUNY Foundation for Gigafactory New York, and what are the consequences if they fail to meet these obligations?",
+      "why_this_tests_chunking": "Tests broken references problem - contains 'under this arrangement' and 'these obligations' which reference earlier content. Semantic chunking should keep the obligation description with the consequences, while naive chunking might split them mid-paragraph."
     },
     {
-      "id": "T4",
-      "source": "tesla_10k_excerpt",
-      "question": "How many patents and patent applications did Tesla have as of December 31, 2011, and in which areas?"
+      "id": "4",
+      "source": "tesla_10k_2024",
+      "question": "What are Tesla's capital expenditure plans for 2025 and beyond, and what are the main factors that could cause these projections to vary?",
+      "why_this_tests_chunking": "Tests context preservation across sections. The answer spans 'Management Opportunities' section (forward-looking) and 'Cash Flow' discussion (historical context). Good chunking should maintain metadata about which section information comes from and preserve the relationship between projections and their qualifying statements."
     },
     {
-      "id": "T5",
-      "source": "tesla_10k_excerpt",
-      "question": "What is Tesla’s planned vehicle platform strategy for future models like the Model X, and what are its intended benefits?"
+      "id": "5",
+      "source": "tesla_10k_2024",
+      "question": "Describe Tesla's cybersecurity risk management approach, including how risks are identified, assessed, and reported to the Board. What role does the Audit Committee play?",
+      "why_this_tests_chunking": "Tests table/list handling and hierarchical structure. The cybersecurity section contains multi-stage processes (4-stage incident response), governance structure, and committee responsibilities. Naive chunking might split the process steps or separate governance roles from their descriptions, losing the organizational hierarchy."
     }
   ]
 }

@@ -16,6 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 COPY ./pyproject.toml ./poetry.lock* /app/
 RUN poetry install --no-root --only main
 
+# Pre-download NLTK data and sentence-transformers model
+RUN python -c "import nltk; nltk.download('punkt', quiet=True)" && \
+    python -c "from sentence_transformers import SentenceTransformer as ST; ST('all-MiniLM-L6-v2')"
+
 # Copy application code and migrations
 COPY ./entrypoint.sh /app/entrypoint.sh
 COPY ./migrations /app/migrations

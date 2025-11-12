@@ -42,7 +42,22 @@ def upgrade():
         ),
     )
 
+    # Ensure pgvector is enabled before creating vector index
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+
+    # Indexes optimized for retrieval
+    op.create_index("idx_document_chunks_strategy", "document_chunks", ["strategy"])
+    op.create_index(
+        "idx_document_chunks_embedding",
+        "document_chunks",
+        ["embedding"],
+        postgresql_using="ivfflat",
+    )
+
 
 def downgrade():
+    # Drop indexes in reverse order
+    op.drop_index("idx_document_chunks_embedding", table_name="document_chunks")
+    op.drop_index("idx_document_chunks_strategy", table_name="document_chunks")
     op.drop_table("document_chunks")
     op.execute("DROP TYPE IF EXISTS chunk_strategy")

@@ -40,7 +40,7 @@ class RetrievalService:
         LIMIT :top_k;
         """
 
-        results = (
+        rows = (
             self.db.execute(
                 text(sql),
                 {
@@ -53,4 +53,5 @@ class RetrievalService:
             .all()
         )
 
-        return results
+        # Convert RowMapping objects to plain dicts for JSON serialization
+        return [dict(r) for r in rows]

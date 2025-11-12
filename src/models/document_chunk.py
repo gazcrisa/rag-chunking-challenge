@@ -10,11 +10,13 @@ from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
+
 class ChunkStrategy(StrEnum):
     FIXED = "FIXED"
     SENTENCE = "SENTENCE"
     SEMANTIC = "SEMANTIC"
     SLIDING_WINDOW = "SLIDING_WINDOW"
+
 
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
